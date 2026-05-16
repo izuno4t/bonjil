@@ -23,7 +23,7 @@ fmt:
 	cargo fmt
 
 lint:
-	markdownlint-cli2 README.md docs/*.md CLAUDE.md AGENTS.local.md tests/fixtures/**/*.md benches/README.md
+	markdownlint-cli2 README.md docs/*.md CLAUDE.md AGENTS.local.md tests/fixtures/**/*.md benches/README.md tools/eval/README.md
 
 clippy:
 	cargo clippy --all-targets --all-features -- -D warnings

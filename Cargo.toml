@@ -15,15 +15,19 @@ path = "src/main.rs"
 
 [[bin]]
 name = "bonjil-eval"
-path = "src/bin/bonjil-eval.rs"
+path = "tools/eval/bin/bonjil-eval.rs"
 
 [[bin]]
 name = "bonjil-compare-baseline"
-path = "src/bin/bonjil-compare-baseline.rs"
+path = "tools/eval/bin/bonjil-compare-baseline.rs"
 
 [[bin]]
 name = "bonjil-bench"
-path = "src/bin/bonjil-bench.rs"
+path = "tools/eval/bin/bonjil-bench.rs"
+
+[[bin]]
+name = "bonjil-corpus-eval"
+path = "tools/eval/bin/bonjil-corpus-eval.rs"
 
 [profile.release]
 lto = true
