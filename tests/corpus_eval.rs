@@ -14,6 +14,8 @@ fn corpus_eval_outputs_comparison_report() {
         .arg(root)
         .arg("--out")
         .arg("target/corpus-eval-test/report.json")
+        .arg("--output-root")
+        .arg("target/corpus-eval-test/outputs")
         .arg("--limit")
         .arg("1")
         .output()
@@ -28,6 +30,7 @@ fn corpus_eval_outputs_comparison_report() {
     assert!(report.contains("\"tool\":\"bonjil\""));
     assert!(report.contains("\"summary\""));
     assert!(report.contains("\"superiority_claim\""));
+    assert!(fs::read_dir("target/corpus-eval-test/outputs/bonjil").is_ok());
 }
 
 #[test]
@@ -44,6 +47,8 @@ fn corpus_eval_can_filter_by_extension() {
         .arg(root)
         .arg("--out")
         .arg("target/corpus-eval-filter-test/report.json")
+        .arg("--output-root")
+        .arg("target/corpus-eval-filter-test/outputs")
         .arg("--limit")
         .arg("10")
         .arg("--per-ext")

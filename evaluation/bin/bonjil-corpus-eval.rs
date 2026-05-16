@@ -22,16 +22,12 @@ fn main() {
 fn run() -> io::Result<()> {
     let args = Args::parse();
     let files = select_files(&args.root, args.limit, args.per_ext, &args.extensions)?;
-    let output_root = args
-        .out
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("target/corpus"));
+    let output_root = args.output_root;
     fs::create_dir_all(&output_root)?;
 
     let mut cases = Vec::new();
     for file in files {
-        cases.push(evaluate_file(&file, &output_root)?);
+        cases.push(evaluate_file(&file, &output_root, &args.tools)?);
     }
 
     let summary = summarize(&cases);
@@ -46,18 +42,22 @@ fn run() -> io::Result<()> {
 struct Args {
     root: PathBuf,
     out: PathBuf,
+    output_root: PathBuf,
     limit: usize,
     per_ext: usize,
     extensions: Option<Vec<String>>,
+    tools: Vec<String>,
 }
 
 impl Args {
     fn parse() -> Self {
         let mut root = PathBuf::from("/Users/izuno/マイドライブ/docs/outdated");
         let mut out = PathBuf::from("target/corpus/report.json");
+        let mut output_root = PathBuf::from("target/corpus");
         let mut limit = 30;
         let mut per_ext = 5;
         let mut extensions = None;
+        let mut tools = vec!["pandoc".to_string(), "markitdown".to_string()];
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -69,6 +69,11 @@ impl Args {
                 "--out" => {
                     if let Some(value) = args.next() {
                         out = PathBuf::from(value);
+                    }
+                }
+                "--output-root" => {
+                    if let Some(value) = args.next() {
+                        output_root = PathBuf::from(value);
                     }
                 }
                 "--limit" => {
@@ -92,15 +97,26 @@ impl Args {
                         );
                     }
                 }
+                "--tools" => {
+                    if let Some(value) = args.next() {
+                        tools = value
+                            .split(',')
+                            .map(|item| item.trim().to_lowercase())
+                            .filter(|item| !item.is_empty())
+                            .collect();
+                    }
+                }
                 _ => {}
             }
         }
         Self {
             root,
             out,
+            output_root,
             limit,
             per_ext,
             extensions,
+            tools,
         }
     }
 }
@@ -191,11 +207,12 @@ fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     Ok(())
 }
 
-fn evaluate_file(input: &Path, output_root: &Path) -> io::Result<CaseResult> {
+fn evaluate_file(input: &Path, output_root: &Path, tools: &[String]) -> io::Result<CaseResult> {
     let extension = extension(input).unwrap_or_else(|| "unknown".to_string());
     let mut results = vec![run_bonjil(input, output_root)?];
-    results.push(run_external_tool("pandoc", input, output_root));
-    results.push(run_external_tool("markitdown", input, output_root));
+    for tool in tools {
+        results.push(run_external_tool(tool, input, output_root));
+    }
     let winner = results
         .iter()
         .filter(|result| result.status == "ok")
@@ -280,21 +297,28 @@ fn run_external_tool(tool: &str, input: &Path, output_root: &Path) -> ToolResult
             metrics: MarkdownMetrics::default(),
         };
     }
-    let output = run_external_tool_in_docker(tool, input);
+    let output_path = output_path(output_root, tool, input);
+    let report_path = sidecar_report_path(&output_path);
+    let output = run_external_tool_in_docker(tool, input, &output_path, &report_path);
     match output {
-        Ok(output) if output.status.success() => {
-            let markdown = String::from_utf8_lossy(&output.stdout).to_string();
-            let output_path = output_path(output_root, tool, input);
-            let write_result = write_output(&output_path, &markdown);
-            ToolResult {
+        Ok(output) if output.status.success() => match fs::read_to_string(&output_path) {
+            Ok(markdown) => ToolResult {
                 tool: tool.to_string(),
-                status: if write_result.is_ok() { "ok" } else { "error" }.to_string(),
+                status: "ok".to_string(),
                 elapsed_ms: started.elapsed().as_millis(),
-                output_path: write_result.ok().map(|_| output_path),
+                output_path: Some(output_path),
                 error: None,
                 metrics: markdown_metrics(&markdown),
-            }
-        }
+            },
+            Err(error) => ToolResult {
+                tool: tool.to_string(),
+                status: "error".to_string(),
+                elapsed_ms: started.elapsed().as_millis(),
+                output_path: None,
+                error: Some(format!("runner did not write markdown output: {error}")),
+                metrics: MarkdownMetrics::default(),
+            },
+        },
         Ok(output) => ToolResult {
             tool: tool.to_string(),
             status: "error".to_string(),
@@ -314,12 +338,22 @@ fn run_external_tool(tool: &str, input: &Path, output_root: &Path) -> ToolResult
     }
 }
 
-fn run_external_tool_in_docker(tool: &str, input: &Path) -> io::Result<std::process::Output> {
+fn run_external_tool_in_docker(
+    tool: &str,
+    input: &Path,
+    output_path: &Path,
+    report_path: &Path,
+) -> io::Result<std::process::Output> {
     let parent = input.parent().unwrap_or_else(|| Path::new("."));
     let file_name = input.file_name().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "input path has no file name")
     })?;
+    let output_dir = output_path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "output path has no parent"))?;
+    fs::create_dir_all(output_dir)?;
     let mount = format!("{}:/input:ro", parent.display());
+    let output_mount = format!("{}:/output", output_dir.display());
     let image = docker_image(tool);
     let mut command = Command::new("docker");
     command
@@ -329,23 +363,30 @@ fn run_external_tool_in_docker(tool: &str, input: &Path) -> io::Result<std::proc
         .arg("none")
         .arg("-v")
         .arg(mount)
+        .arg("-v")
+        .arg(output_mount)
         .arg("-w")
         .arg("/input")
         .arg(image);
-    if tool == "pandoc" {
-        command.arg(file_name).arg("-t").arg("gfm");
-    } else {
-        command.arg(file_name);
-    }
+    command
+        .arg(Path::new("/input").join(file_name))
+        .arg(Path::new("/output").join(output_path.file_name().unwrap()))
+        .arg(Path::new("/output").join(report_path.file_name().unwrap()));
     command.output()
 }
 
 fn docker_image(tool: &str) -> String {
     match tool {
         "pandoc" => env::var("BONJIL_EVAL_PANDOC_IMAGE")
-            .unwrap_or_else(|_| "pandoc/core:latest".to_string()),
+            .unwrap_or_else(|_| "bonjil-eval-pandoc:latest".to_string()),
         "markitdown" => env::var("BONJIL_EVAL_MARKITDOWN_IMAGE")
-            .unwrap_or_else(|_| "markitdown:latest".to_string()),
+            .unwrap_or_else(|_| "bonjil-eval-markitdown:latest".to_string()),
+        "docling" => env::var("BONJIL_EVAL_DOCLING_IMAGE")
+            .unwrap_or_else(|_| "bonjil-eval-docling:latest".to_string()),
+        "pymupdf4llm" => env::var("BONJIL_EVAL_PYMUPDF4LLM_IMAGE")
+            .unwrap_or_else(|_| "bonjil-eval-pymupdf4llm:latest".to_string()),
+        "mammoth-js" => env::var("BONJIL_EVAL_MAMMOTH_JS_IMAGE")
+            .unwrap_or_else(|_| "bonjil-eval-mammoth-js:latest".to_string()),
         _ => tool.to_string(),
     }
 }
@@ -564,6 +605,10 @@ fn output_path(output_root: &Path, tool: &str, input: &Path) -> PathBuf {
     output_root
         .join(tool)
         .join(format!("{}.md", safe_name(&input.to_string_lossy())))
+}
+
+fn sidecar_report_path(output_path: &Path) -> PathBuf {
+    output_path.with_extension("report.json")
 }
 
 fn write_output(path: &Path, markdown: &str) -> io::Result<()> {

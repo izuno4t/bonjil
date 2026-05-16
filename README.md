@@ -136,7 +136,20 @@ bonjil input.md --llm claude-opus --restructure --allow-external-send -o output.
 make test
 make lint
 make clippy
-make ci
+make verify
+```
+
+固定fixtureの回帰確認はCIにも含まれます。
+
+```bash
+make regression-test
+```
+
+実文書評価と性能確認はCIとは分けて実行します。
+
+```bash
+make bench
+make corpus-eval
 ```
 
 `just` を使う場合も同等の入口があります。

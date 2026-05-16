@@ -1,0 +1,38 @@
+# Tool Runners
+
+このディレクトリは、比較に利用する外部ツールのDocker実装を管理する。
+
+## 共通契約
+
+各ランナーは次の契約を満たす。
+
+- Dockerコンテナ内で実行する
+- 第1引数に入力ファイルパスを受け取る
+- 第2引数にMarkdown出力先パスを受け取る
+- 第3引数にreport JSON出力先パスを受け取る
+- Markdownを指定された出力先へ書く
+- 実行サマリを標準出力へ短いJSONとして出す
+- エラーは標準エラーと終了コードで返す
+- 外部ネットワークなしでも実行できるよう、依存関係はイメージ内に固定する
+
+`bonjil-corpus-eval` はこの契約を前提に、ツール別Dockerイメージを起動する。
+
+## イメージ名
+
+| ツール | 既定イメージ |
+| ---- | ---- |
+| Pandoc | `bonjil-eval-pandoc:latest` |
+| MarkItDown | `bonjil-eval-markitdown:latest` |
+| Docling | `bonjil-eval-docling:latest` |
+| PyMuPDF4LLM | `bonjil-eval-pymupdf4llm:latest` |
+| Mammoth.js/Turndown | `bonjil-eval-mammoth-js:latest` |
+
+## ビルド例
+
+```bash
+docker build -t bonjil-eval-pandoc:latest evaluation/tool-runners/pandoc
+docker build -t bonjil-eval-markitdown:latest evaluation/tool-runners/markitdown
+docker build -t bonjil-eval-docling:latest evaluation/tool-runners/docling
+docker build -t bonjil-eval-pymupdf4llm:latest evaluation/tool-runners/pymupdf4llm
+docker build -t bonjil-eval-mammoth-js:latest evaluation/tool-runners/mammoth-js
+```

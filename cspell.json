@@ -1,0 +1,32 @@
+{
+  "version": "0.2",
+  "language": "en,ja",
+  "useGitignore": true,
+  "ignorePaths": [
+    "target/**",
+    "Cargo.lock",
+    "baselines/**",
+    "tests/fixtures/**"
+  ],
+  "dictionaryDefinitions": [
+    {
+      "name": "bonjil-project",
+      "path": "./cspell-project-words.txt",
+      "addWords": true
+    }
+  ],
+  "dictionaries": [
+    "bonjil-project"
+  ],
+  "files": [
+    "**/*.md",
+    "**/*.rs",
+    "**/*.toml",
+    "**/*.yml",
+    "**/*.yaml"
+  ],
+  "ignoreRegExpList": [
+    "/https?:\\/\\/[^\\s)]+/g",
+    "/[A-Za-z]:\\\\[^\\s]+/g"
+  ]
+}

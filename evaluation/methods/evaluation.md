@@ -1,6 +1,7 @@
 # Evaluation
 
 この文書は、実文書コーパスでbonjilと既存ツールを比較する手順を定義する。
+形式ごとの比較対象ツールは [../tools.md](../tools.md) に定義する。
 
 ## 目的
 
@@ -17,22 +18,40 @@
 
 ```bash
 cargo run --bin bonjil-corpus-eval -- \
-  --root /Users/izuno/マイドライブ/docs/outdated \
-  --out target/corpus/report.json \
+  --root evaluation/inputs \
+  --out evaluation/reports/report.json \
+  --output-root evaluation/outputs \
   --limit 30 \
-  --per-ext 5
+  --per-ext 5 \
+  --tools pandoc,markitdown
 ```
 
-出力Markdownは `target/corpus/<tool>/` に保存される。
+PDFだけを100件評価する場合は、次のように実行する。
+
+```bash
+cargo run --bin bonjil-corpus-eval -- \
+  --root evaluation/inputs \
+  --out evaluation/reports/pdf-100-report.json \
+  --output-root evaluation/outputs \
+  --limit 100 \
+  --per-ext 100 \
+  --ext pdf \
+  --tools docling,pymupdf4llm
+```
+
+出力Markdownは `evaluation/outputs/<tool>/` に保存される。
 
 ## 比較対象
 
 - `bonjil`: このリポジトリの変換器
-- `pandoc`: PATHに存在する場合のみ実行
-- `markitdown`: PATHに存在する場合のみ実行
+- `pandoc`: Dockerイメージ `bonjil-eval-pandoc:latest` で実行
+- `markitdown`: Dockerイメージ `bonjil-eval-markitdown:latest` で実行
+- `docling`: Dockerイメージ `bonjil-eval-docling:latest` で実行
+- `pymupdf4llm`: Dockerイメージ `bonjil-eval-pymupdf4llm:latest` で実行
+- `mammoth-js`: Dockerイメージ `bonjil-eval-mammoth-js:latest` で実行
 
-未導入または変換失敗したツールは、report JSONに `missing` または `error`
-として記録する。
+Dockerが未導入、イメージが未作成、または変換に失敗したツールは、report JSONに
+`missing` または `error` として記録する。
 
 ## 優位性の扱い
 
