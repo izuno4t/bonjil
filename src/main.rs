@@ -1,0 +1,151 @@
+use std::env;
+use std::fs;
+use std::io::{self, Write};
+use std::path::PathBuf;
+
+use bonjil::{
+    ConversionOptions, Converter, load_config, parse_flavor, parse_format, parse_llm, parse_ocr,
+};
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("bonjil: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> io::Result<()> {
+    let mut args = env::args().skip(1).peekable();
+    let mut input = None;
+    let mut output = None;
+    let mut options = ConversionOptions::default();
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-o" | "--output" => output = args.next().map(PathBuf::from),
+            "-f" | "--format" => {
+                if let Some(value) = args.next() {
+                    options.format = parse_format(&value).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("unknown format: {value}"),
+                        )
+                    })?;
+                }
+            }
+            "--flavor" => {
+                if let Some(value) = args.next() {
+                    options.flavor = parse_flavor(&value).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("unknown flavor: {value}"),
+                        )
+                    })?;
+                }
+            }
+            "--extract-media" => options.extract_media = args.next().map(PathBuf::from),
+            "--inline-base64-media" => options.inline_base64_media = true,
+            "--ocr" => {
+                if let Some(value) = args.next() {
+                    options.ocr = parse_ocr(&value);
+                }
+            }
+            "--llm" => {
+                if let Some(value) = args.next() {
+                    options.llm = parse_llm(&value);
+                }
+            }
+            "--restructure" => options.restructure = true,
+            "--translate" => options.translate = args.next(),
+            "--report" => options.report_path = args.next().map(PathBuf::from),
+            "--strict" => options.strict = true,
+            "--config" => {
+                if let Some(value) = args.next() {
+                    let config_path = PathBuf::from(value);
+                    let mut config_options = load_config(&config_path)?;
+                    config_options.config_path = Some(config_path);
+                    options = merge_options(config_options, options);
+                }
+            }
+            "--allow-external-send" => options.consent_external_send = true,
+            "-h" | "--help" => {
+                print_help();
+                return Ok(());
+            }
+            value if value.starts_with('-') => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("unknown option: {value}"),
+                ));
+            }
+            value => input = Some(PathBuf::from(value)),
+        }
+    }
+
+    let input =
+        input.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing input path"))?;
+    let converter = Converter::new().with_options(options.clone());
+    let result = converter.convert_file(&input)?;
+
+    if options.strict && !result.report.warnings.is_empty() {
+        return Err(io::Error::other(format!(
+            "strict mode failed with {} warning(s)",
+            result.report.warnings.len()
+        )));
+    }
+
+    if let Some(report_path) = &options.report_path {
+        fs::write(report_path, result.report.to_json())?;
+    }
+
+    if let Some(output_path) = output {
+        fs::write(output_path, result.markdown)?;
+    } else {
+        io::stdout().write_all(result.markdown.as_bytes())?;
+    }
+
+    Ok(())
+}
+
+fn merge_options(
+    base: ConversionOptions,
+    override_options: ConversionOptions,
+) -> ConversionOptions {
+    ConversionOptions {
+        flavor: override_options.flavor,
+        format: override_options.format,
+        extract_media: override_options.extract_media.or(base.extract_media),
+        inline_base64_media: override_options.inline_base64_media || base.inline_base64_media,
+        ocr: override_options.ocr,
+        llm: override_options.llm,
+        restructure: override_options.restructure || base.restructure,
+        translate: override_options.translate.or(base.translate),
+        report_path: override_options.report_path.or(base.report_path),
+        strict: override_options.strict || base.strict,
+        config_path: override_options.config_path.or(base.config_path),
+        consent_external_send: override_options.consent_external_send || base.consent_external_send,
+    }
+}
+
+fn print_help() {
+    println!(
+        "\
+bonjil [INPUT] [OPTIONS]
+
+Options:
+  -o, --output <PATH>         Output path, stdout when omitted
+  -f, --format <FMT>          md, mdx, html
+  --flavor <FLAVOR>           commonmark, gfm, markdownlint, hedgedoc
+  --extract-media <DIR>       Extract media directory
+  --inline-base64-media       Embed media as base64 where supported
+  --ocr <ENGINE>              auto, ndlocr-lite, ndl-koten, tesseract, surya, none
+  --llm <MODEL>               claude-*, gpt-*, ollama:*, none
+  --restructure               Apply LLM restructure filter
+  --translate <LANG>          Translate with selected LLM
+  --report <PATH>             Write conversion report JSON
+  --strict                    Treat warnings as errors
+  --config <PATH>             Load bonjil.toml-style config
+  --allow-external-send       Allow selected cloud LLM backend to receive input
+"
+    );
+}

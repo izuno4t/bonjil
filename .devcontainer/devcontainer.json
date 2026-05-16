@@ -1,0 +1,36 @@
+{
+  "name": "bonjil",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "DavidAnson.vscode-markdownlint",
+        "GitHub.vscode-github-actions"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "rust-analyzer.check.command": "clippy",
+        "markdownlint.config": {
+          "MD013": {
+            "code_blocks": false,
+            "tables": false
+          },
+          "MD024": false
+        }
+      }
+    }
+  },
+  "postCreateCommand": "rustup component add rustfmt clippy && npm install -g markdownlint-cli2 && cargo fetch",
+  "remoteUser": "vscode"
+}

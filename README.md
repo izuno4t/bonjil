@@ -1,2 +1,3 @@
 # bonjil
-Distill rich documents into their essence — structured Markdown that humans can actually read.
+
+Distill rich documents into structured Markdown that humans can actually read.

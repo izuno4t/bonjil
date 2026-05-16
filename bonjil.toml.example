@@ -1,0 +1,4 @@
+flavor = "gfm"
+format = "markdown"
+strict = false
+consent_external_send = false

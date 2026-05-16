@@ -1,0 +1,5 @@
+structure_fidelity = 0.90
+heading_recall = 0.90
+table_integrity = 0.90
+ocr_cer = 0.95
+translation_structure_preserve = 0.95

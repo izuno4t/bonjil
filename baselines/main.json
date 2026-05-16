@@ -1,0 +1,11 @@
+{
+  "summary": {
+    "total_fixtures": 1,
+    "passed": 1,
+    "failed": 0,
+    "avg_structure_fidelity": 1.0,
+    "avg_heading_recall": 1.0,
+    "avg_table_integrity": 1.0,
+    "lint_total_errors": 0
+  }
+}
