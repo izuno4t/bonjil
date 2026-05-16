@@ -19,6 +19,25 @@
 | ✅ | 完了、DONE |
 | 🚫 | 中止、CANCELLED |
 
+## 参照した公開資料
+
+TASK-044以降は、要件文の表現をそのまま作業名へ写すのではなく、
+公開仕様、公式ツール文書、公開ベンチマークの観点から分解する。
+
+| 種別 | 参照先 | タスク化への使い方 |
+| ---- | ---- | ---- |
+| 公式仕様 | [ECMA-376 Office Open XML](https://ecma-international.org/publications-and-standards/standards/ecma-376/) | DOCX/PPTX/XLSXをZIP内XML断片ではなく、語彙、部品、関係を持つOOXMLパッケージとして扱う根拠にする。 |
+| 公式文書 | [Microsoft Learn: Structure of a PresentationML document](https://learn.microsoft.com/en-us/office/open-xml/presentation/structure-of-a-presentationml-document) | PPTXのslide、shape、picture、table、notes、master/layoutを抽出対象へ含める根拠にする。 |
+| 公式文書 | [Microsoft Learn: Shared String Table](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/working-with-the-shared-string-table) | XLSXの表示テキスト復元でsharedStringsを必須部品として扱う根拠にする。 |
+| 公式文書 | [Microsoft Learn: Merge cells](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-merge-two-adjacent-cells-in-a-spreadsheet) | XLSXの結合セル、空セル、複数ヘッダーを表構造復元の対象にする根拠にする。 |
+| 準公式/仕様解説 | [PDFlib: Tagged PDF Basics](https://www.pdflib.com/pdf-knowledge-base/pdfua/tagged-pdf-basics/) | PDFでは描画順と論理読順が一致しない前提を置き、tag treeと座標レイアウトの両方を評価する根拠にする。 |
+| 公式文書 | [Pandoc User's Guide](https://pandoc.org/MANUAL.html) | 既存ツールのAST変換が構造保持を重視しつつ、複雑表などで損失があり得る比較軸にする。 |
+| 公式文書 | [Docling Supported formats](https://docling-project.github.io/docling/usage/supported_formats/) | 比較対象がPDF/DOCX/PPTX/XLSXを統一表現へ変換できるため、同じ入力で横比較する根拠にする。 |
+| 公式リポジトリ | [Microsoft MarkItDown README](https://github.com/microsoft/markitdown/blob/main/README.md) | Markdown変換ツールとしてPDF/Office系の比較対象に含める根拠にする。 |
+| 公式リポジトリ | [PyMuPDF4LLM README](https://github.com/pymupdf/pymupdf4llm) | PDFの画像、ベクター、ページchunk、OCRを比較観点に入れる根拠にする。 |
+| 公式リポジトリ | [Mammoth.js README](https://github.com/mwilliamson/mammoth.js/) | DOCXの意味構造とstyle map依存、Markdown出力の制約を比較観点に入れる根拠にする。 |
+| 公開ベンチ | [DocLayNet](https://github.com/DS4SD/DocLayNet) | レイアウト分類、人手アノテーション、多様な文書カテゴリを評価ルーブリック設計の根拠にする。 |
+
 ## タスク一覧
 
 | ID | Status | Summary | DependsOn |
@@ -66,15 +85,15 @@
 | TASK-041 | ✅ | 整備する性能ベンチマーク | TASK-040 |
 | TASK-042 | ✅ | 整備するクロスプラットフォーム配布 | TASK-041 |
 | TASK-043 | ✅ | 分離する評価関連ツールのディレクトリ | TASK-042 |
-| TASK-044 | ⏳ | 整備する曖昧構造文書fixture | TASK-043 |
-| TASK-045 | ⏳ | 実装するOOXMLパッケージ読取 | TASK-044 |
-| TASK-046 | ⏳ | 実装するPPTX視覚順序復元 | TASK-045 |
-| TASK-047 | ⏳ | 実装するPPTX疑似表復元 | TASK-046 |
-| TASK-048 | ⏳ | 実装するXLSX結合セルと複数ヘッダー | TASK-045 |
-| TASK-049 | ⏳ | 実装するPDF段落リスト表復元 | TASK-044 |
-| TASK-050 | ⏳ | 実装する図表番号とキャプション対応付け | TASK-047,TASK-049 |
-| TASK-051 | ⏳ | 整備する人手レビュー評価ルーブリック | TASK-044 |
-| TASK-052 | ⏳ | 比較する実コーパス評価レポート | TASK-050,TASK-051 |
+| TASK-044 | ⏳ | 調査する公開仕様とベンチマーク根拠 | TASK-043 |
+| TASK-045 | ⏳ | 定義する現実文書パターン分類とfixture設計 | TASK-044 |
+| TASK-046 | ⏳ | 実装するOOXMLパッケージ部品解決 | TASK-045 |
+| TASK-047 | ⏳ | 実装するPresentationML視覚順序と図形構造復元 | TASK-046 |
+| TASK-048 | ⏳ | 実装するSpreadsheetML表構造復元 | TASK-046 |
+| TASK-049 | ⏳ | 実装するPDF論理構造とレイアウト読順復元 | TASK-045 |
+| TASK-050 | ⏳ | 実装する図表キャプションとメディア対応付け | TASK-047,TASK-049 |
+| TASK-051 | ⏳ | 整備する公開ベンチ準拠の評価ルーブリック | TASK-045,TASK-050 |
+| TASK-052 | ⏳ | 比較する実コーパス評価レポート | TASK-051 |
 
 ## タスク詳細（補足が必要な場合のみ）
 
@@ -295,57 +314,67 @@
 
 ### TASK-044
 
-- 補足: 構造が曖昧、破損、視覚表現依存の合成fixtureを追加する。
-- 対象: PPTX、XLSX、PDF、DOCXの現実寄りパターン。
-- 注意: きれいに構造化された入力だけを増やさない。
+- 補足: OOXML、PDF、既存Markdown変換ツール、公開レイアウトベンチの資料を確認し、評価対象にする文書構造を根拠付きで整理する。
+- 対象: ECMA-376、Microsoft Open XML、Tagged PDF、Pandoc、Docling、MarkItDown、PyMuPDF4LLM、Mammoth.js、DocLayNet。
+- 成果: `evaluation/methods/` か `docs/tasks.md` に、参照元、採用理由、未採用理由を記録する。
+- 注意: 要件文に書かれた問題例をそのままタスク化せず、公開資料から確認できる構造単位へ分解する。
 
 ### TASK-045
 
-- 補足: DOCX / PPTX / XLSX のZIPパッケージを読み、内部XMLを解決する。
-- 対象: relationships、shared strings、slides、worksheets、media。
-- 注意: XML断片だけで完了扱いにしない。
+- 補足: 公開仕様と公開ベンチの分類をもとに、実文書で崩れやすいパターンをfixtureと実コーパス評価項目へ落とす。
+- 対象: 複数カラム、図表、キャプション、リスト、脚注、表、結合セル、text box、shape、notes、ヘッダー/フッター。
+- 成果: `tests/fixtures/unit/` の合成fixture方針と `evaluation/inputs/` の実コーパス選定基準を文書化する。
+- 注意: 整った見出し/段落/表だけのfixtureは、既存ツール優位の確認にしかならないため主対象にしない。
 
 ### TASK-046
 
-- 補足: PPTXのテキストボックス、座標、サイズから読み順を推定する。
-- 対象: 複数カラム、注記、フッター、タイトル、本文。
-- 注意: XML順と視覚順が異なる場合はwarningに記録する。
+- 補足: DOCX / PPTX / XLSXをOOXMLパッケージとして読み、Content Types、relationships、部品パス、media参照を解決する。
+- 対象: document、slides、slide layouts、slide masters、worksheets、shared strings、drawings、media、notes。
+- 成果: XML断片単体ではなく、部品間関係を保持した入力モデルを追加する。
+- 注意: `word/document.xml` や `ppt/slides/slide1.xml` だけを読んで完了扱いにしない。
 
 ### TASK-047
 
-- 補足: 見た目は表だが内部は図形やテキストボックスのPPTXを表として復元する。
-- 対象: 行列配置、ヘッダー風セル、空セル、枠線だけの表。
-- 注意: 確信度が低い場合は表にせず段落へフォールバックする。
+- 補足: PresentationMLのshape tree、placeholder、picture、table、group shape、notesをもとに、スライドの読順と構造を復元する。
+- 対象: XML順と視覚順の不一致、複数カラム、タイトル/本文/注記/フッター、図形で作られた疑似表。
+- 成果: 座標、サイズ、placeholder種別、z-order、グループ構造を使う読順推定とwarning出力を実装する。
+- 注意: 確信度が低い疑似表はMarkdown tableにせず、候補と理由をreportへ残して段落へフォールバックする。
 
 ### TASK-048
 
-- 補足: XLSXの結合セル、空セル、複数ヘッダー行、表示値を処理する。
-- 対象: merged cells、inline strings、shared strings、数式結果。
-- 注意: 数式そのものと表示値のどちらを採用したかreportに出す。
+- 補足: SpreadsheetMLのworksheet、sheetData、mergeCells、sharedStrings、inline strings、formula/valueを使い、Markdownで壊れにくい表構造へ復元する。
+- 対象: 結合セル、空セル、複数ヘッダー行、表タイトル、注記行、数式結果、表示値、複数シート。
+- 成果: Markdown table、HTML table、または警告付きfallbackの選択理由をreportに出す。
+- 注意: 数式そのものを出したのか、キャッシュされた表示値を出したのかを必ず記録する。
 
 ### TASK-049
 
-- 補足: PDF化で失われた段落、リスト、表、脚注、読み順を復元する。
-- 対象: 物理改行、段組み、箇条書き記号、罫線なし表。
-- 注意: 失敗時はプレーンテキストではなく警告付きMarkdownにする。
+- 補足: Tagged PDFの論理構造を優先し、存在しない場合は座標、フォント、行間、列、罫線、画像領域から読順と構造を推定する。
+- 対象: 段落、見出し、リスト、脚注、複数カラム、罫線あり/なし表、ヘッダー/フッター、ページ番号。
+- 成果: tag tree利用有無、座標推定の信頼度、除外したartifact、fallback理由をreportに出す。
+- 注意: 抽出失敗時に無警告のプレーンテキストへ潰さず、失われた構造を明示する。
 
 ### TASK-050
 
-- 補足: 画像、図表番号、キャプションの対応関係を復元する。
-- 対象: Officeの図表番号、PDFの近傍キャプション、画像入りセル。
-- 注意: 対応が曖昧な場合は候補と確信度をreportに残す。
+- 補足: Officeのmedia relationships、DrawingML、Word/PDFの近傍テキスト、DocLayNetのFigure/Table/Caption相当分類を使い、図表とキャプションを対応付ける。
+- 対象: Officeの図表番号、PDFの近傍キャプション、画像入りセル、スライド上の画像説明、複数候補。
+- 成果: Markdown本文、media出力、report JSONで同じmedia idを参照できるようにする。
+- 注意: 対応が曖昧な場合は単一決定せず、候補、距離、ページ/スライド、確信度をreportに残す。
 
 ### TASK-051
 
-- 補足: 人が `evaluation/outputs/` を見るための採点ルーブリックを作る。
-- 対象: 見出し、表、画像、読み順、キャプション、警告品質。
-- 注意: 自動スコアだけで優位性を断定しない。
+- 補足: DocLayNetの人手アノテーションとレイアウト分類を参考に、自動スコアと人手確認を分けた評価ルーブリックを整備する。
+- 対象: title、text、list、table、figure、caption、footnote、formula、page header/footer、読順、警告品質。
+- 成果: `evaluation/methods/evaluation.md` に採点項目、重大度、合格基準、レビュー手順を記録する。
+- 注意: 既存ツールとの差は、自動スコア、目視レビュー、失敗時reportの説明可能性を合わせて判断する。
 
 ### TASK-052
 
-- 補足: 実コーパスでbonjilと比較ツールを横並び評価する。
-- 対象: Docling、MarkItDown、PyMuPDF4LLM、Mammoth.js、Pandoc。
-- 注意: `evaluation/inputs` と `evaluation/outputs` の中身はGit管理外にする。
+- 補足: `evaluation/inputs/` の実コーパスを使い、bonjilと比較ツールを同一入力、同一出力配置、同一ルーブリックで横並び評価する。
+- 対象: Docling、MarkItDown、PyMuPDF4LLM、Mammoth.js、Pandoc。形式ごとに利用可能なPython/Rust/TypeScriptライブラリも比較候補へ含める。
+- 成果: `evaluation/outputs/` にMarkdown、tool report、差分、
+  目視レビュー用indexを出し、`evaluation/reports/` に集計を残す。
+- 注意: `evaluation/inputs`、`evaluation/outputs`、`evaluation/reports` の実データはGit管理外にし、CIでは実コーパス評価を実行しない。
 
 ## Backlog一覧
 
