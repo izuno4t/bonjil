@@ -1,0 +1,14 @@
+<sst>
+  <si>
+    <r><t>事業主</t></r>
+    <rPh sb="0" eb="3"><t>ジギョウヌシ</t></rPh>
+    <phoneticPr fontId="1" type="noConversion"/>
+  </si>
+  <si>
+    <t>名称</t>
+    <rPh sb="0" eb="2"><t>メイショウ</t></rPh>
+  </si>
+  <si>
+    <t>株式会社サンプル</t>
+  </si>
+</sst>

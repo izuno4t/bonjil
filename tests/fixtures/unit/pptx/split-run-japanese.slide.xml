@@ -1,0 +1,28 @@
+<p:sld>
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr>
+          <p:nvPr>
+            <p:ph type="title"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="0"/>
+          </a:xfrm>
+        </p:spPr>
+        <p:txBody>
+          <a:p>
+            <a:r><a:t>建学</a:t></a:r>
+            <a:r><a:t>の精神</a:t></a:r>
+          </a:p>
+          <a:p>
+            <a:r><a:t>権利自由、</a:t></a:r>
+            <a:r><a:t>独立自治</a:t></a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>

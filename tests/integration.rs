@@ -3,6 +3,9 @@ use bonjil::{
     evaluate_heading_recall, evaluate_lint_score, evaluate_structure_fidelity,
     evaluate_table_integrity, evaluate_translation_structure_preserve, markdown, office,
 };
+use std::fs;
+use std::path::Path;
+use std::process::Command;
 
 #[test]
 fn converts_ast_to_commonmark() {
@@ -359,5 +362,142 @@ fn parses_xlsx_and_pptx_xml_to_structured_ast() {
     assert_eq!(
         markdown::write_markdown(&pptx, Flavor::CommonMark),
         include_str!("fixtures/unit/pptx/simple-slide.expected.md")
+    );
+}
+
+#[test]
+fn parses_pptx_visual_order_from_shape_coordinates() {
+    let slide = include_str!("fixtures/unit/pptx/visual-order-shapes.slide.xml");
+    let expected = include_str!("fixtures/unit/pptx/visual-order-shapes.expected.md");
+    let mut warnings = Vec::new();
+
+    let ast = office::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
+    let rendered = markdown::write_markdown(&ast, Flavor::CommonMark);
+
+    assert_eq!(rendered, expected);
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("visual order"))
+    );
+}
+
+#[test]
+fn parses_pptx_split_runs_without_breaking_japanese_words() {
+    let slide = include_str!("fixtures/unit/pptx/split-run-japanese.slide.xml");
+    let expected = include_str!("fixtures/unit/pptx/split-run-japanese.expected.md");
+    let mut warnings = Vec::new();
+
+    let ast = office::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
+    let rendered = markdown::write_markdown(&ast, Flavor::CommonMark);
+
+    assert_eq!(rendered, expected);
+}
+
+#[test]
+fn parses_xlsx_merged_headers_inline_strings_and_formula_values() {
+    let sheet = include_str!("fixtures/unit/xlsx/merged-header-sheet.worksheet.xml");
+    let shared = include_str!("fixtures/unit/xlsx/merged-header-sheet.shared-strings.xml");
+    let expected = include_str!("fixtures/unit/xlsx/merged-header-sheet.expected.md");
+    let mut warnings = Vec::new();
+
+    let ast = office::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
+    let rendered = markdown::write_markdown(&ast, Flavor::Gfm);
+
+    assert_eq!(rendered, expected);
+    assert!(warnings.iter().any(|warning| warning.contains("formula")));
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("mergeCells"))
+    );
+}
+
+#[test]
+fn parses_xlsx_shared_strings_without_phonetic_readings() {
+    let sheet = include_str!("fixtures/unit/xlsx/phonetic-shared-string.worksheet.xml");
+    let shared = include_str!("fixtures/unit/xlsx/phonetic-shared-string.shared-strings.xml");
+    let expected = include_str!("fixtures/unit/xlsx/phonetic-shared-string.expected.md");
+    let mut warnings = Vec::new();
+
+    let ast = office::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
+    let rendered = markdown::write_markdown(&ast, Flavor::Gfm);
+
+    assert_eq!(rendered, expected);
+}
+
+#[test]
+fn converts_ooxml_packages_with_parts_and_relationships() {
+    let root = Path::new("target/ooxml-package-test");
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root.join("ppt/slides/_rels")).unwrap();
+    fs::create_dir_all(root.join("xl/worksheets")).unwrap();
+    fs::create_dir_all(root.join("xl")).unwrap();
+    fs::write(
+        root.join("ppt/slides/slide1.xml"),
+        include_str!("fixtures/unit/pptx/visual-order-shapes.slide.xml"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("ppt/slides/_rels/slide1.xml.rels"),
+        "<Relationships></Relationships>",
+    )
+    .unwrap();
+    fs::write(
+        root.join("xl/worksheets/sheet1.xml"),
+        include_str!("fixtures/unit/xlsx/merged-header-sheet.worksheet.xml"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("xl/sharedStrings.xml"),
+        include_str!("fixtures/unit/xlsx/merged-header-sheet.shared-strings.xml"),
+    )
+    .unwrap();
+
+    let pptx = root.join("sample.pptx");
+    let xlsx = root.join("sample.xlsx");
+    zip_fixture(
+        root,
+        &pptx,
+        &["ppt/slides/slide1.xml", "ppt/slides/_rels/slide1.xml.rels"],
+    );
+    zip_fixture(
+        root,
+        &xlsx,
+        &["xl/worksheets/sheet1.xml", "xl/sharedStrings.xml"],
+    );
+
+    let converter = Converter::new().with_options(ConversionOptions {
+        flavor: Flavor::Gfm,
+        ..ConversionOptions::default()
+    });
+    let pptx_result = converter.convert_file(&pptx).unwrap();
+    let xlsx_result = converter.convert_file(&xlsx).unwrap();
+
+    assert_eq!(pptx_result.report.input_format, "pptx");
+    assert!(
+        pptx_result
+            .report
+            .metadata
+            .iter()
+            .any(|(key, value)| key == "slides" && value == "1")
+    );
+    assert_eq!(xlsx_result.report.input_format, "xlsx");
+    assert!(xlsx_result.markdown.contains("Region Summary"));
+}
+
+fn zip_fixture(root: &Path, output: &Path, parts: &[&str]) {
+    let mut command = Command::new("zip");
+    command
+        .arg("-q")
+        .arg(output.file_name().expect("zip output must have file name"));
+    for part in parts {
+        command.arg(part);
+    }
+    let output = command.current_dir(root).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

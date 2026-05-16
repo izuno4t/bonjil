@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use bonjil::{ConversionOptions, Flavor, convert_bytes};
+use bonjil::{ConversionOptions, Converter, Flavor};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "pdf", "html", "htm", "docx", "pptx", "xlsx", "epub", "md", "txt",
@@ -211,6 +211,9 @@ fn evaluate_file(input: &Path, output_root: &Path, tools: &[String]) -> io::Resu
     let extension = extension(input).unwrap_or_else(|| "unknown".to_string());
     let mut results = vec![run_bonjil(input, output_root)?];
     for tool in tools {
+        if tool == "bonjil" {
+            continue;
+        }
         results.push(run_external_tool(tool, input, output_root));
     }
     let winner = results
@@ -247,15 +250,12 @@ fn evaluate_file(input: &Path, output_root: &Path, tools: &[String]) -> io::Resu
 fn run_bonjil(input: &Path, output_root: &Path) -> io::Result<ToolResult> {
     let started = Instant::now();
     let output_path = output_path(output_root, "bonjil", input);
-    let bytes = fs::read(input)?;
-    let result = convert_bytes(
-        input.to_string_lossy().as_ref(),
-        &bytes,
-        ConversionOptions {
+    let result = Converter::new()
+        .with_options(ConversionOptions {
             flavor: Flavor::Gfm,
             ..ConversionOptions::default()
-        },
-    );
+        })
+        .convert_file(input);
     match result {
         Ok(result) => {
             write_output(&output_path, &result.markdown)?;

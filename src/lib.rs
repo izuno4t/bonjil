@@ -230,8 +230,11 @@ impl Converter {
     pub fn convert_file<P: AsRef<Path>>(&self, input: P) -> io::Result<ConversionResult> {
         let path = input.as_ref();
         let bytes = fs::read(path)?;
-        if extension(path) == "docx" {
-            return self.convert_docx_file(path);
+        match extension(path).as_str() {
+            "docx" | "pptx" | "xlsx" => {
+                return self.convert_ooxml_file(path, extension(path));
+            }
+            _ => {}
         }
         self.convert_bytes(&path.to_string_lossy(), &bytes)
     }
@@ -332,30 +335,82 @@ impl Converter {
         })
     }
 
-    fn convert_docx_file(&self, path: &Path) -> io::Result<ConversionResult> {
+    fn convert_ooxml_file(
+        &self,
+        path: &Path,
+        input_format: String,
+    ) -> io::Result<ConversionResult> {
         let started = Instant::now();
         let mut warnings = Vec::new();
-        let output = Command::new("unzip")
-            .arg("-p")
-            .arg(path)
-            .arg("word/document.xml")
-            .output();
-        let ast = match output {
-            Ok(output) if output.status.success() => {
-                let xml = String::from_utf8_lossy(&output.stdout);
-                docx::parse_document_xml(&xml, &mut warnings)
+        let mut metadata = vec![("parser".to_string(), "unzip+ooxml-package".to_string())];
+        let ast = match input_format.as_str() {
+            "docx" => match unzip_part(path, "word/document.xml") {
+                Ok(xml) => {
+                    metadata.push(("part".to_string(), "word/document.xml".to_string()));
+                    let rels = unzip_part(path, "word/_rels/document.xml.rels").unwrap_or_default();
+                    if !rels.is_empty() {
+                        metadata.push((
+                            "relationships".to_string(),
+                            "word/_rels/document.xml.rels".to_string(),
+                        ));
+                    }
+                    docx::parse_document_xml_with_rels(&xml, &rels, &mut warnings)
+                }
+                Err(error) => {
+                    warnings.push(format!("failed to extract DOCX document.xml: {error}"));
+                    vec![unsupported_node("docx")]
+                }
+            },
+            "pptx" => {
+                let slides = read_numbered_parts(path, "ppt/slides/slide", ".xml", 200);
+                if slides.is_empty() {
+                    warnings.push("failed to extract PPTX slide parts from package.".to_string());
+                    vec![unsupported_node("pptx")]
+                } else {
+                    metadata.push(("slides".to_string(), slides.len().to_string()));
+                    let rels =
+                        read_numbered_parts(path, "ppt/slides/_rels/slide", ".xml.rels", 200)
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                    if !rels.is_empty() {
+                        metadata.push(("slide_relationships".to_string(), rels.len().to_string()));
+                    }
+                    let mut ast = Vec::new();
+                    for (index, slide) in slides.iter().enumerate() {
+                        let slide_rels = rels.get(index).map(String::as_str).unwrap_or_default();
+                        ast.extend(office::parse_pptx_slide_xml_with_rels(
+                            slide,
+                            slide_rels,
+                            &mut warnings,
+                        ));
+                    }
+                    ast
+                }
             }
-            Ok(output) => {
-                warnings.push(format!(
-                    "failed to extract DOCX document.xml: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-                vec![unsupported_node("docx")]
+            "xlsx" => {
+                let shared_strings = unzip_part(path, "xl/sharedStrings.xml").unwrap_or_default();
+                if !shared_strings.is_empty() {
+                    metadata.push(("part".to_string(), "xl/sharedStrings.xml".to_string()));
+                }
+                let sheets = read_numbered_parts(path, "xl/worksheets/sheet", ".xml", 200);
+                if sheets.is_empty() {
+                    warnings
+                        .push("failed to extract XLSX worksheet parts from package.".to_string());
+                    vec![unsupported_node("xlsx")]
+                } else {
+                    metadata.push(("worksheets".to_string(), sheets.len().to_string()));
+                    let mut ast = Vec::new();
+                    for sheet in sheets {
+                        ast.extend(office::parse_xlsx_sheet_xml_with_warnings(
+                            &sheet,
+                            &shared_strings,
+                            &mut warnings,
+                        ));
+                    }
+                    ast
+                }
             }
-            Err(error) => {
-                warnings.push(format!("failed to run unzip for DOCX: {error}"));
-                vec![unsupported_node("docx")]
-            }
+            _ => vec![unsupported_node(&input_format)],
         };
         let rendered = render(&ast, &self.options);
         let mut media = collect_media_paths(&ast);
@@ -367,11 +422,11 @@ impl Converter {
             markdown: rendered,
             report: ConversionReport {
                 input_path: path.to_string_lossy().to_string(),
-                input_format: "docx".to_string(),
+                input_format,
                 output_format: format_name(self.options.format).to_string(),
                 flavor: flavor_name(self.options.flavor).to_string(),
                 warnings,
-                metadata: vec![("parser".to_string(), "unzip+document.xml".to_string())],
+                metadata,
                 elapsed_ms: started.elapsed().as_millis(),
                 used_ocr: false,
                 ocr_engine: None,
@@ -382,6 +437,27 @@ impl Converter {
             },
         })
     }
+}
+
+fn unzip_part(path: &Path, part: &str) -> io::Result<String> {
+    let output = Command::new("unzip")
+        .arg("-p")
+        .arg(path)
+        .arg(part)
+        .output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn read_numbered_parts(path: &Path, prefix: &str, suffix: &str, max: usize) -> Vec<String> {
+    (1..=max)
+        .filter_map(|index| unzip_part(path, &format!("{prefix}{index}{suffix}")).ok())
+        .filter(|content| !content.trim().is_empty())
+        .collect()
 }
 
 impl Default for Converter {
@@ -938,46 +1014,177 @@ pub mod office {
     use super::{AstNode, TableCell, TableRow, decode_entities, strip_tags};
 
     pub fn parse_xlsx_sheet_xml(sheet_xml: &str, shared_strings_xml: &str) -> Vec<AstNode> {
+        parse_xlsx_sheet_xml_with_warnings(sheet_xml, shared_strings_xml, &mut Vec::new())
+    }
+
+    pub fn parse_xlsx_sheet_xml_with_warnings(
+        sheet_xml: &str,
+        shared_strings_xml: &str,
+        warnings: &mut Vec<String>,
+    ) -> Vec<AstNode> {
         let shared_strings = extract_blocks(shared_strings_xml, "<si", "</si>")
             .into_iter()
-            .map(|item| decode_entities(&strip_tags(&item)))
+            .map(|item| {
+                let without_phonetics = remove_blocks(&item, "<rPh", "</rPh>");
+                decode_entities(&strip_tags(&without_phonetics))
+                    .trim()
+                    .to_string()
+            })
             .collect::<Vec<_>>();
+        let merged_cells = parse_merge_cells(sheet_xml);
         let rows = extract_blocks(sheet_xml, "<row", "</row>")
             .into_iter()
             .map(|row| TableRow {
-                cells: extract_blocks(&row, "<c", "</c>")
+                cells: extract_elements(&row, "<c", "</c>")
                     .into_iter()
                     .map(|cell| {
-                        let value = extract_blocks(&cell, "<v", "</v>")
+                        let value = extract_blocks(&cell.body, "<v", "</v>")
                             .first()
-                            .map(|value| decode_entities(&strip_tags(value)))
+                            .map(|value| decode_entities(&strip_tags(value)).trim().to_string())
                             .unwrap_or_default();
-                        let text = if cell.contains("t=\"s\"") {
+                        let inline_text = extract_blocks(&cell.body, "<t", "</t>")
+                            .first()
+                            .map(|value| decode_entities(&strip_tags(value)).trim().to_string());
+                        let text = if cell.opening.contains("t=\"s\"") {
                             value
                                 .parse::<usize>()
                                 .ok()
                                 .and_then(|index| shared_strings.get(index).cloned())
                                 .unwrap_or(value)
+                        } else if cell.opening.contains("t=\"inlineStr\"") {
+                            inline_text.unwrap_or(value)
                         } else {
                             value
                         };
+                        if cell.body.contains("<f") {
+                            warnings.push(format!(
+                                "xlsx formula cell {} emitted cached display value",
+                                attr_value(&cell.opening, "r").unwrap_or_else(|| "?".to_string())
+                            ));
+                        }
+                        let reference = attr_value(&cell.opening, "r");
+                        let span = reference.as_deref().and_then(|reference| {
+                            merged_cells.iter().find(|merge| merge.start == reference)
+                        });
                         TableCell {
                             text,
-                            rowspan: 1,
-                            colspan: 1,
+                            rowspan: span.map(|merge| merge.rowspan).unwrap_or(1),
+                            colspan: span.map(|merge| merge.colspan).unwrap_or(1),
                             image: None,
                         }
                     })
                     .collect(),
             })
             .collect::<Vec<_>>();
+        if !merged_cells.is_empty() {
+            warnings.push(format!(
+                "xlsx mergeCells expanded {} merged range(s)",
+                merged_cells.len()
+            ));
+        }
         vec![AstNode::Table { rows }]
     }
 
     pub fn parse_pptx_slide_xml(slide_xml: &str) -> Vec<AstNode> {
+        parse_pptx_slide_xml_with_rels(slide_xml, "", &mut Vec::new())
+    }
+
+    pub fn parse_pptx_slide_xml_with_rels(
+        slide_xml: &str,
+        rels_xml: &str,
+        warnings: &mut Vec<String>,
+    ) -> Vec<AstNode> {
+        let mut items = Vec::new();
+        for shape in extract_elements(slide_xml, "<p:sp", "</p:sp>") {
+            let x = parse_i64_attr_after(&shape.body, "<a:off", "x").unwrap_or(0);
+            let y = parse_i64_attr_after(&shape.body, "<a:off", "y").unwrap_or(0);
+            if let Some(table) = parse_drawing_table(&shape.body) {
+                items.push(PositionedNode {
+                    x,
+                    y,
+                    node: AstNode::Table { rows: table },
+                    source: "table",
+                });
+                continue;
+            }
+            let paragraphs = extract_text_paragraphs(&shape.body);
+            let texts = paragraphs
+                .iter()
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>();
+            if texts.is_empty() {
+                continue;
+            }
+            let placeholder = attr_value_after(&shape.body, "<p:ph", "type");
+            let mut nodes = if matches!(placeholder.as_deref(), Some("title" | "ctrTitle")) {
+                let mut nodes = vec![AstNode::Heading {
+                    level: 1,
+                    text: texts[0].clone(),
+                }];
+                nodes.extend(texts.iter().skip(1).cloned().map(AstNode::Paragraph));
+                nodes
+            } else {
+                vec![AstNode::Paragraph(texts.join("\n"))]
+            };
+            for node in nodes.drain(..) {
+                items.push(PositionedNode {
+                    x,
+                    y,
+                    node,
+                    source: "shape",
+                });
+            }
+        }
+        for picture in extract_elements(slide_xml, "<p:pic", "</p:pic>") {
+            let x = parse_i64_attr_after(&picture.body, "<a:off", "x").unwrap_or(0);
+            let y = parse_i64_attr_after(&picture.body, "<a:off", "y").unwrap_or(0);
+            let embed = attr_value_after(&picture.body, "<a:blip", "r:embed");
+            let path = embed
+                .as_deref()
+                .and_then(|id| relationship_target(rels_xml, id))
+                .unwrap_or_else(|| {
+                    embed
+                        .map(|id| format!("media/{id}.png"))
+                        .unwrap_or_else(|| "media/unknown-image.png".to_string())
+                });
+            items.push(PositionedNode {
+                x,
+                y,
+                node: AstNode::Image {
+                    alt: "slide image".to_string(),
+                    path,
+                    title: None,
+                },
+                source: "picture",
+            });
+        }
+        if !items.is_empty()
+            && items
+                .iter()
+                .all(|item| item.x == 0 && item.y == 0 && item.source == "shape")
+        {
+            return parse_pptx_legacy_text_order(slide_xml);
+        }
+        if items.is_empty() {
+            return parse_pptx_legacy_text_order(slide_xml);
+        }
+        if items.iter().any(|item| item.x != 0 || item.y != 0) {
+            warnings.push("pptx visual order inferred from shape coordinates".to_string());
+            items.sort_by_key(|item| (item.y, item.x));
+        }
+        if looks_like_pseudo_table(&items) {
+            warnings.push(
+                "pptx shape grid looks like a pseudo table; kept as ordered text".to_string(),
+            );
+        }
+        items.into_iter().map(|item| item.node).collect()
+    }
+
+    fn parse_pptx_legacy_text_order(slide_xml: &str) -> Vec<AstNode> {
         let texts = extract_blocks(slide_xml, "<a:t", "</a:t>")
             .into_iter()
-            .map(|text| decode_entities(&strip_tags(&text)))
+            .map(|text| decode_entities(&strip_tags(&text)).trim().to_string())
             .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>();
         texts
@@ -989,6 +1196,26 @@ pub mod office {
                 } else {
                     AstNode::Paragraph(text)
                 }
+            })
+            .collect()
+    }
+
+    fn extract_text_paragraphs(shape_body: &str) -> Vec<String> {
+        let paragraphs = extract_blocks(shape_body, "<a:p", "</a:p>");
+        if paragraphs.is_empty() {
+            return extract_blocks(shape_body, "<a:t", "</a:t>")
+                .into_iter()
+                .map(|text| decode_entities(&strip_tags(&text)))
+                .collect();
+        }
+        paragraphs
+            .into_iter()
+            .map(|paragraph| {
+                extract_blocks(&paragraph, "<a:t", "</a:t>")
+                    .into_iter()
+                    .map(|text| decode_entities(&strip_tags(&text)))
+                    .collect::<Vec<_>>()
+                    .join("")
             })
             .collect()
     }
@@ -1011,6 +1238,184 @@ pub mod office {
         }
         result
     }
+
+    #[derive(Clone, Debug)]
+    struct Element {
+        opening: String,
+        body: String,
+    }
+
+    #[derive(Clone, Debug)]
+    struct MergeRange {
+        start: String,
+        rowspan: usize,
+        colspan: usize,
+    }
+
+    #[derive(Clone, Debug)]
+    struct PositionedNode {
+        x: i64,
+        y: i64,
+        node: AstNode,
+        source: &'static str,
+    }
+
+    fn extract_elements(input: &str, open: &str, close: &str) -> Vec<Element> {
+        let mut result = Vec::new();
+        let mut rest = input;
+        while let Some(start) = rest.find(open) {
+            let after = &rest[start..];
+            let Some(open_end) = after.find('>') else {
+                break;
+            };
+            let opening = after[..=open_end].to_string();
+            let body_start = start + open_end + 1;
+            let Some(end_rel) = rest[body_start..].find(close) else {
+                break;
+            };
+            let end = body_start + end_rel;
+            result.push(Element {
+                opening,
+                body: rest[body_start..end].to_string(),
+            });
+            rest = &rest[end + close.len()..];
+        }
+        result
+    }
+
+    fn parse_merge_cells(sheet_xml: &str) -> Vec<MergeRange> {
+        let mut ranges = Vec::new();
+        let mut rest = sheet_xml;
+        while let Some(start) = rest.find("<mergeCell") {
+            let after = &rest[start..];
+            let Some(end) = after.find('>') else {
+                break;
+            };
+            let tag = &after[..=end];
+            if let Some(reference) = attr_value(tag, "ref") {
+                if let Some(range) = parse_merge_range(&reference) {
+                    ranges.push(range);
+                }
+            }
+            rest = &after[end + 1..];
+        }
+        ranges
+    }
+
+    fn parse_merge_range(reference: &str) -> Option<MergeRange> {
+        let (start, end) = reference.split_once(':')?;
+        let (start_col, start_row) = split_cell_reference(start)?;
+        let (end_col, end_row) = split_cell_reference(end)?;
+        Some(MergeRange {
+            start: start.to_string(),
+            rowspan: end_row.saturating_sub(start_row) + 1,
+            colspan: end_col.saturating_sub(start_col) + 1,
+        })
+    }
+
+    fn split_cell_reference(reference: &str) -> Option<(usize, usize)> {
+        let letters = reference
+            .chars()
+            .take_while(|character| character.is_ascii_alphabetic())
+            .collect::<String>();
+        let digits = reference
+            .chars()
+            .skip_while(|character| character.is_ascii_alphabetic())
+            .collect::<String>();
+        Some((column_number(&letters)?, digits.parse().ok()?))
+    }
+
+    fn column_number(column: &str) -> Option<usize> {
+        let mut value = 0usize;
+        for character in column.chars() {
+            let upper = character.to_ascii_uppercase();
+            if !upper.is_ascii_uppercase() {
+                return None;
+            }
+            value = value * 26 + (upper as usize - 'A' as usize + 1);
+        }
+        Some(value)
+    }
+
+    fn parse_drawing_table(shape_body: &str) -> Option<Vec<TableRow>> {
+        let table = extract_blocks(shape_body, "<a:tbl", "</a:tbl>")
+            .into_iter()
+            .next()?;
+        let rows = extract_blocks(&table, "<a:tr", "</a:tr>")
+            .into_iter()
+            .map(|row| TableRow {
+                cells: extract_blocks(&row, "<a:tc", "</a:tc>")
+                    .into_iter()
+                    .map(|cell| TableCell {
+                        text: extract_blocks(&cell, "<a:t", "</a:t>")
+                            .into_iter()
+                            .map(|text| decode_entities(&strip_tags(&text)))
+                            .collect::<Vec<_>>()
+                            .join(""),
+                        rowspan: 1,
+                        colspan: 1,
+                        image: None,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        Some(rows)
+    }
+
+    fn remove_blocks(input: &str, open: &str, close: &str) -> String {
+        let mut output = String::new();
+        let mut rest = input;
+        while let Some(start) = rest.find(open) {
+            output.push_str(&rest[..start]);
+            let Some(end_rel) = rest[start..].find(close) else {
+                return output;
+            };
+            rest = &rest[start + end_rel + close.len()..];
+        }
+        output.push_str(rest);
+        output
+    }
+
+    fn looks_like_pseudo_table(items: &[PositionedNode]) -> bool {
+        let shape_items = items
+            .iter()
+            .filter(|item| item.source == "shape" && matches!(item.node, AstNode::Paragraph(_)))
+            .collect::<Vec<_>>();
+        if shape_items.len() < 4 {
+            return false;
+        }
+        let mut xs = shape_items.iter().map(|item| item.x).collect::<Vec<_>>();
+        let mut ys = shape_items.iter().map(|item| item.y).collect::<Vec<_>>();
+        xs.sort();
+        xs.dedup();
+        ys.sort();
+        ys.dedup();
+        xs.len() >= 2 && ys.len() >= 2
+    }
+
+    fn parse_i64_attr_after(input: &str, marker: &str, name: &str) -> Option<i64> {
+        attr_value_after(input, marker, name)?.parse().ok()
+    }
+
+    fn attr_value_after(input: &str, marker: &str, name: &str) -> Option<String> {
+        let start = input.find(marker)?;
+        let rest = &input[start..];
+        let end = rest.find('>')?;
+        attr_value(&rest[..=end], name)
+    }
+
+    fn attr_value(input: &str, name: &str) -> Option<String> {
+        let pattern = format!("{name}=\"");
+        let start = input.find(&pattern)? + pattern.len();
+        let end = input[start..].find('"')?;
+        Some(input[start..start + end].to_string())
+    }
+
+    fn relationship_target(rels_xml: &str, id: &str) -> Option<String> {
+        let marker = format!("Id=\"{id}\"");
+        let start = rels_xml.find(&marker)?;
+        attr_value(&rels_xml[start..], "Target")
+    }
 }
 
 pub mod pdf {
@@ -1022,6 +1427,16 @@ pub mod pdf {
             "PDF parser extracts text objects; coordinates and layout inference are limited."
                 .to_string(),
         );
+        if lossy.contains("/StructTreeRoot") {
+            warnings.push(
+                "PDF tagged structure detected; logical reading order should be preferred."
+                    .to_string(),
+            );
+        } else {
+            warnings.push(
+                "PDF tag tree was not detected; falling back to content stream order.".to_string(),
+            );
+        }
         let text_objects = extract_text_objects(&lossy);
         if text_objects.is_empty() {
             warnings.push("PDF text extraction produced no text; OCR may be required.".to_string());

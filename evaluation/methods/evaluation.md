@@ -65,3 +65,29 @@ report JSONの `superiority_claim` は、人間レビューまたはground truth
 - 既存ツールが失敗した入力でbonjilが有用なMarkdownを出す
 - 表、画像、キャプション、コードブロックの破損が少ない
 - warning/reportにより失敗原因を追跡できる
+
+## 人手レビュー ルーブリック
+
+DocLayNet型のレイアウト分類を参考に、次の項目を0から2点で採点する。
+
+| 項目 | 0点 | 1点 | 2点 |
+| ---- | ---- | ---- | ---- |
+| title/heading | 見出しが失われる | 一部だけ復元 | 階層と本文分離が妥当 |
+| text/paragraph | 本文が欠落または混線 | 大半は読めるが改行や順序に問題 | 段落単位で読める |
+| list | 箇条書きが段落化 | 記号は残るが階層が曖昧 | listとして復元 |
+| table | 表が欠落または一次元化 | セルは残るが行列/結合が不完全 | 行列、結合、fallback理由が妥当 |
+| figure/image | 画像が欠落 | 画像は出るが位置や説明が曖昧 | media idと本文参照が追跡可能 |
+| caption | captionが欠落 | caption候補はあるが対応が曖昧 | 図表とcaptionが対応 |
+| footnote | 脚注が本文へ混入 | 脚注らしい文字列だけ残る | footnoteとして分離 |
+| formula/value | 数式/表示値が欠落 | どちらかは出るが説明なし | 採用値と根拠がreportに出る |
+| reading order | 読順が崩れる | 一部崩れるが推測可能 | 人が読む順序として妥当 |
+| warnings | 無警告で壊れる | 警告はあるが原因不明 | 原因、fallback、信頼度が追跡可能 |
+
+## Fixture化判定
+
+実コーパスで0点または1点になった項目は、次の条件を満たす場合にfixture化する。
+
+- 公開データまたは再配布可能データで観測された問題である。
+- 問題と同じ文書形式で最小再現できる。
+- expected Markdownだけでなく、warningまたはreportで失敗理由を確認できる。
+- 元データの出典、ライセンス、観測結果を `evaluation/public-corpus*.md` に記録する。

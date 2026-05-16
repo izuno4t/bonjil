@@ -69,3 +69,53 @@ endstream
             .any(|warning| warning.contains("heading inference"))
     );
 }
+
+#[test]
+fn reports_tagged_pdf_structure_when_available() {
+    let bytes = br#"%PDF-1.7
+1 0 obj
+<< /Type /Catalog /StructTreeRoot 2 0 R >>
+endobj
+stream
+BT
+/F1 12 Tf
+72 720 Td
+(Tagged paragraph) Tj
+ET
+endstream
+"#;
+    let mut warnings = Vec::new();
+
+    let ast = pdf::parse_pdf(bytes, &mut warnings);
+
+    assert_eq!(ast, vec![AstNode::Paragraph("Tagged paragraph".to_string())]);
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("tagged structure"))
+    );
+}
+
+#[test]
+fn skips_binary_like_pdf_text_fragments_with_warning() {
+    let bytes = "%PDF-1.7
+stream
+BT
+/F1 12 Tf
+(正常な本文) Tj
+(abc\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}def) Tj
+ET
+endstream
+"
+    .as_bytes();
+    let mut warnings = Vec::new();
+
+    let ast = pdf::parse_pdf(bytes, &mut warnings);
+
+    assert_eq!(ast, vec![AstNode::Paragraph("正常な本文".to_string())]);
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("binary-like"))
+    );
+}

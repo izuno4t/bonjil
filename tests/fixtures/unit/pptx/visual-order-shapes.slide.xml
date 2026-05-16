@@ -1,0 +1,44 @@
+<p:sld>
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr>
+          <p:nvPr>
+            <p:ph type="body"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="1200000"/>
+          </a:xfrm>
+        </p:spPr>
+        <p:txBody>
+          <a:p>
+            <a:r>
+              <a:t>Body appears first in XML</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:nvPr>
+            <p:ph type="title"/>
+          </p:nvPr>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="0" y="0"/>
+          </a:xfrm>
+        </p:spPr>
+        <p:txBody>
+          <a:p>
+            <a:r>
+              <a:t>Visual Title</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>
