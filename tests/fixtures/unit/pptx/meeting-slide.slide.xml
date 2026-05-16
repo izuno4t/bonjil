@@ -1,0 +1,43 @@
+<p:sld>
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:p>
+            <a:r>
+              <a:t>Quarterly Review</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:txBody>
+          <a:p>
+            <a:r>
+              <a:t>Revenue grew 12%</a:t>
+            </a:r>
+          </a:p>
+          <a:p>
+            <a:r>
+              <a:t>Support tickets fell 8%</a:t>
+            </a:r>
+          </a:p>
+          <a:p>
+            <a:r>
+              <a:t>Risk: hiring plan delayed</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:txBody>
+          <a:p>
+            <a:r>
+              <a:t>Next action: update forecast by Friday</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>

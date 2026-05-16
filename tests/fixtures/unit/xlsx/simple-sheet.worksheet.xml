@@ -1,0 +1,20 @@
+<worksheet>
+  <sheetData>
+    <row>
+      <c>
+        <v>Name</v>
+      </c>
+      <c>
+        <v>Value</v>
+      </c>
+    </row>
+    <row>
+      <c>
+        <v>Alpha</v>
+      </c>
+      <c>
+        <v>42</v>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>

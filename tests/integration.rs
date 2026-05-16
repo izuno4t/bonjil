@@ -267,38 +267,57 @@ fn reports_unsupported_formats_without_external_calls() {
 
 #[test]
 fn converts_pptx_slide_xml_bytes_to_markdown() {
+    let slide = include_bytes!("fixtures/unit/pptx/simple-slide.slide.xml");
+    let expected = include_str!("fixtures/unit/pptx/simple-slide.expected.md");
     let converter = Converter::new().with_options(ConversionOptions {
         flavor: Flavor::CommonMark,
         ..ConversionOptions::default()
     });
-    let result = converter
-        .convert_bytes(
-            "slides.pptx",
-            br#"<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>Slide title</a:t></a:r></a:p><a:p><a:r><a:t>Slide body</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>"#,
-        )
-        .unwrap();
+    let result = converter.convert_bytes("slides.pptx", slide).unwrap();
 
-    assert_eq!(result.markdown, "# Slide title\n\nSlide body\n");
+    assert_eq!(result.markdown, expected);
     assert_eq!(result.report.input_format, "pptx");
 }
 
 #[test]
 fn converts_xlsx_sheet_xml_bytes_to_markdown_table() {
+    let sheet = include_bytes!("fixtures/unit/xlsx/simple-sheet.worksheet.xml");
+    let expected = include_str!("fixtures/unit/xlsx/simple-sheet.expected.md");
     let converter = Converter::new().with_options(ConversionOptions {
         flavor: Flavor::Gfm,
         ..ConversionOptions::default()
     });
-    let result = converter
-        .convert_bytes(
-            "sheet.xlsx",
-            br#"<worksheet><sheetData><row><c><v>Name</v></c><c><v>Value</v></c></row><row><c><v>Alpha</v></c><c><v>42</v></c></row></sheetData></worksheet>"#,
-        )
-        .unwrap();
+    let result = converter.convert_bytes("sheet.xlsx", sheet).unwrap();
 
-    assert_eq!(
-        result.markdown,
-        "| Name | Value |\n| --- | --- |\n| Alpha | 42 |\n"
-    );
+    assert_eq!(result.markdown, expected);
+    assert_eq!(result.report.input_format, "xlsx");
+}
+
+#[test]
+fn converts_realistic_pptx_slide_xml_fixture_to_markdown() {
+    let slide = include_bytes!("fixtures/unit/pptx/meeting-slide.slide.xml");
+    let expected = include_str!("fixtures/unit/pptx/meeting-slide.expected.md");
+    let converter = Converter::new().with_options(ConversionOptions {
+        flavor: Flavor::CommonMark,
+        ..ConversionOptions::default()
+    });
+    let result = converter.convert_bytes("meeting.pptx", slide).unwrap();
+
+    assert_eq!(result.markdown, expected);
+    assert_eq!(result.report.input_format, "pptx");
+}
+
+#[test]
+fn converts_realistic_xlsx_sheet_xml_fixture_to_markdown() {
+    let sheet = include_bytes!("fixtures/unit/xlsx/budget-sheet.worksheet.xml");
+    let expected = include_str!("fixtures/unit/xlsx/budget-sheet.expected.md");
+    let converter = Converter::new().with_options(ConversionOptions {
+        flavor: Flavor::Gfm,
+        ..ConversionOptions::default()
+    });
+    let result = converter.convert_bytes("budget.xlsx", sheet).unwrap();
+
+    assert_eq!(result.markdown, expected);
     assert_eq!(result.report.input_format, "xlsx");
 }
 
@@ -329,9 +348,9 @@ fn parses_docx_heading_paragraph_list_fixture() {
 
 #[test]
 fn parses_xlsx_and_pptx_xml_to_structured_ast() {
-    let shared = r#"<sst><si><t>Name</t></si><si><t>Value</t></si></sst>"#;
-    let sheet = r#"<worksheet><sheetData><row><c t="s"><v>0</v></c><c><v>42</v></c></row></sheetData></worksheet>"#;
-    let slide = r#"<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>Slide title</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>"#;
+    let shared = include_str!("fixtures/unit/xlsx/shared-strings.xml");
+    let sheet = include_str!("fixtures/unit/xlsx/shared-string-sheet.worksheet.xml");
+    let slide = include_str!("fixtures/unit/pptx/simple-slide.slide.xml");
 
     let xlsx = office::parse_xlsx_sheet_xml(sheet, shared);
     let pptx = office::parse_pptx_slide_xml(slide);
@@ -339,6 +358,6 @@ fn parses_xlsx_and_pptx_xml_to_structured_ast() {
     assert!(matches!(xlsx.first(), Some(AstNode::Table { .. })));
     assert_eq!(
         markdown::write_markdown(&pptx, Flavor::CommonMark),
-        "# Slide title\n"
+        include_str!("fixtures/unit/pptx/simple-slide.expected.md")
     );
 }

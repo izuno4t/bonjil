@@ -1,0 +1,16 @@
+<p:sld>
+  <p:cSld>
+    <p:spTree>
+      <a:p>
+        <a:r>
+          <a:t>Slide title</a:t>
+        </a:r>
+      </a:p>
+      <a:p>
+        <a:r>
+          <a:t>Slide body</a:t>
+        </a:r>
+      </a:p>
+    </p:spTree>
+  </p:cSld>
+</p:sld>
