@@ -10,7 +10,6 @@ pub(crate) fn detect_format(input_name: &str, bytes: &[u8]) -> String {
     if !ext.is_empty() {
         return match ext.as_str() {
             "htm" => "html".to_string(),
-            "md" => "markdown".to_string(),
             other => other.to_string(),
         };
     }

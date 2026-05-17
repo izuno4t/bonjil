@@ -4,17 +4,18 @@ use std::collections::BTreeMap;
 pub fn evaluate_structure_fidelity(expected: &[AstNode], actual: &[AstNode]) -> MetricScore {
     let expected_signature = structure_signature(expected);
     let actual_signature = structure_signature(actual);
-    let total = expected_signature.len().max(1);
-    let matched = expected_signature
-        .iter()
-        .zip(actual_signature.iter())
-        .filter(|(left, right)| node_kind(left) == node_kind(right))
-        .count();
+    let total = expected_signature.len().max(actual_signature.len()).max(1);
+    let distance = normalized_label_edit_distance(&expected_signature, &actual_signature);
+    let score = 1.0 - (distance as f64 / total as f64).min(1.0);
+    let warnings = (distance > 0)
+        .then(|| format!("structure edit distance {distance} over {total} structural node(s)"))
+        .into_iter()
+        .collect();
     MetricScore {
         name: "structure_fidelity".to_string(),
-        score: matched as f64 / total as f64,
-        errors: total.saturating_sub(matched),
-        warnings: Vec::new(),
+        score,
+        errors: distance,
+        warnings,
     }
 }
 
@@ -225,8 +226,22 @@ fn push_node_signature(node: &AstNode, signature: &mut Vec<String>) {
     }
 }
 
-fn node_kind(node: &String) -> &str {
-    node
+fn normalized_label_edit_distance(expected: &[String], actual: &[String]) -> usize {
+    let mut costs = (0..=actual.len()).collect::<Vec<_>>();
+    for (i, expected_label) in expected.iter().enumerate() {
+        let mut previous_diagonal = i;
+        costs[0] = i + 1;
+        for (j, actual_label) in actual.iter().enumerate() {
+            let previous_up = costs[j + 1];
+            costs[j + 1] = if expected_label == actual_label {
+                previous_diagonal
+            } else {
+                1 + previous_diagonal.min(previous_up).min(costs[j])
+            };
+            previous_diagonal = previous_up;
+        }
+    }
+    costs[actual.len()]
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

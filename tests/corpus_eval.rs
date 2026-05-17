@@ -72,6 +72,40 @@ fn corpus_eval_can_filter_by_extension() {
 }
 
 #[test]
+fn corpus_eval_does_not_select_markdown_inputs() {
+    let root = "target/corpus-eval-md-filter-test/input";
+    fs::create_dir_all(root).unwrap();
+    fs::write(format!("{root}/sample.md"), "# Already markdown").unwrap();
+    fs::write(format!("{root}/sample.html"), "<h1>Title</h1>").unwrap();
+
+    let bin = std::env::var("CARGO_BIN_EXE_bonjil-corpus-eval")
+        .expect("bonjil-corpus-eval binary path is missing");
+    let output = Command::new(bin)
+        .arg("--root")
+        .arg(root)
+        .arg("--out")
+        .arg("target/corpus-eval-md-filter-test/report.json")
+        .arg("--output-root")
+        .arg("target/corpus-eval-md-filter-test/outputs")
+        .arg("--limit")
+        .arg("10")
+        .arg("--per-ext")
+        .arg("10")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = fs::read_to_string("target/corpus-eval-md-filter-test/report.json").unwrap();
+    assert!(report.contains("\"html\":1"));
+    assert!(!report.contains("\"md\":1"));
+    assert!(!report.contains("sample.md"));
+}
+
+#[test]
 fn corpus_eval_marks_too_large_inputs_excluded() {
     let root = "target/corpus-eval-too-large-test/input";
     fs::create_dir_all(root).unwrap();

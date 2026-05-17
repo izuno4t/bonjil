@@ -119,13 +119,13 @@ bonjil は、通常の変換では文書を外部へ送信しません。
 ローカル LLM を使う場合:
 
 ```bash
-bonjil input.md --llm ollama:llama3 --restructure -o output.md
+bonjil input.pdf --llm ollama:llama3 --restructure -o output.md
 ```
 
 クラウド LLM を明示的に許可する場合:
 
 ```bash
-bonjil input.md --llm claude-opus --restructure --allow-external-send -o output.md
+bonjil input.pdf --llm claude-opus --restructure --allow-external-send -o output.md
 ```
 
 ## 開発者向け

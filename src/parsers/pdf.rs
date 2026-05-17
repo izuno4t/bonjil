@@ -25,7 +25,7 @@ pub fn diagnose_no_extractable_text(bytes: &[u8]) -> PdfNoTextDiagnosis {
 
     if has_image && !has_font && !has_text_procset {
         PdfNoTextDiagnosis::ImageOnly
-    } else if (has_font || has_text_procset) && !has_to_unicode {
+    } else if (has_font || has_text_procset) && (!has_to_unicode || has_unmapped_cid_fonts(bytes)) {
         PdfNoTextDiagnosis::MissingUnicodeMaps
     } else {
         PdfNoTextDiagnosis::Unknown
@@ -49,10 +49,13 @@ pub fn parse_pdf_with_ordered_backends(
     let mut best_result = None;
     for backend in backends {
         let result = parse_pdf_with_backend(bytes, *backend, warnings);
-        if pdf_result_has_text(&result) {
+        if pdf_result_has_text(&result) && !result.ocr_required {
             return result;
         }
-        if best_result.is_none() || result.extraction_failed {
+        if best_result
+            .as_ref()
+            .is_none_or(|best| pdf_result_score(&result) > pdf_result_score(best))
+        {
             best_result = Some(result);
         }
     }
@@ -117,7 +120,7 @@ pub fn parse_pdf_with_backend(
         );
     }
     let extraction = backend.extract_text(bytes);
-    let ocr_required = extraction.ocr_required || extraction.objects.is_empty();
+    let mut ocr_required = extraction.ocr_required || extraction.objects.is_empty();
     let ast = if extraction.objects.is_empty() {
         let message = format!(
             "PDF text extraction produced no text with backend {}. A full PDF backend or OCR may be required.",
@@ -128,6 +131,13 @@ pub fn parse_pdf_with_backend(
     } else {
         infer_nodes_from_text_objects(extraction.objects, warnings)
     };
+    if !ocr_required && pdf_text_looks_incomplete(bytes, &ast) {
+        ocr_required = true;
+        warnings.push(
+            "PDF text extraction appears incomplete because CID fonts lack Unicode maps; OCR is required."
+                .to_string(),
+        );
+    }
     PdfParseResult {
         ast,
         backend: backend.name().to_string(),
@@ -169,6 +179,9 @@ pub struct InternalPdfTextBackend;
 pub struct PdfExtractBackend;
 
 pub struct LopdfTextBackend;
+
+type PdfPendingListItem = (String, Vec<AstNode>);
+type PdfPendingList = Option<(bool, Vec<PdfPendingListItem>)>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PdfNoTextDiagnosis {
@@ -309,6 +322,109 @@ fn pdf_result_has_text(result: &PdfParseResult) -> bool {
         AstNode::Heading { .. } => true,
         _ => true,
     })
+}
+
+fn pdf_result_score(result: &PdfParseResult) -> usize {
+    if !pdf_result_has_text(result) {
+        return 0;
+    }
+    let mut score = ast_text(&result.ast)
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    if result.extraction_failed {
+        score = score.saturating_sub(1_000);
+    }
+    if result.ocr_required {
+        score = score.saturating_sub(500);
+    }
+    score
+}
+
+fn pdf_text_looks_incomplete(bytes: &[u8], ast: &[AstNode]) -> bool {
+    if !has_unmapped_cid_fonts(bytes) {
+        return false;
+    }
+    let extracted = ast_text(ast);
+    let cjk_count = extracted
+        .chars()
+        .filter(|character| {
+            matches!(
+                *character as u32,
+                0x3040..=0x30ff | 0x3400..=0x9fff | 0xf900..=0xfaff
+            )
+        })
+        .count();
+    let text_len = extracted
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    text_len < 2_000 && cjk_count < 20
+}
+
+fn has_unmapped_cid_fonts(bytes: &[u8]) -> bool {
+    let lossy = String::from_utf8_lossy(bytes);
+    let type0_count =
+        lossy.matches("/Subtype /Type0").count() + lossy.matches("/Subtype/Type0").count();
+    if type0_count == 0 {
+        return false;
+    }
+    let to_unicode_count = lossy.matches("/ToUnicode").count();
+    type0_count > to_unicode_count
+        && (lossy.contains("Hira")
+            || lossy.contains("Heisei")
+            || lossy.contains("YuGothic")
+            || lossy.contains("YuMincho")
+            || lossy.contains("KozMin")
+            || lossy.contains("Gothic")
+            || lossy.contains("Mincho"))
+}
+
+fn ast_text(nodes: &[AstNode]) -> String {
+    let mut text = String::new();
+    for node in nodes {
+        append_ast_text(node, &mut text);
+        text.push('\n');
+    }
+    text
+}
+
+fn append_ast_text(node: &AstNode, output: &mut String) {
+    match node {
+        AstNode::Heading { text, .. } | AstNode::Paragraph(text) | AstNode::Text(text) => {
+            output.push_str(text);
+        }
+        AstNode::List { items, .. } => {
+            for item in items {
+                for child in item {
+                    append_ast_text(child, output);
+                    output.push(' ');
+                }
+            }
+        }
+        AstNode::Table { rows } => {
+            for row in rows {
+                for cell in &row.cells {
+                    output.push_str(&cell.text);
+                    output.push(' ');
+                }
+            }
+        }
+        AstNode::Image { alt, title, .. } => {
+            output.push_str(alt);
+            if let Some(caption) = title {
+                output.push(' ');
+                output.push_str(caption);
+            }
+        }
+        AstNode::CodeBlock { code, .. } => output.push_str(code),
+        AstNode::RawHtml(html) => output.push_str(html),
+        AstNode::Footnote { label, text } => {
+            output.push_str(label);
+            output.push(' ');
+            output.push_str(text);
+        }
+    }
 }
 
 impl PdfTextBackend for InternalPdfTextBackend {
@@ -505,6 +621,7 @@ fn infer_nodes_from_text_objects(
     let objects = objects
         .into_iter()
         .filter(|object| is_probably_human_text(&object.text))
+        .filter(|object| !is_pdf_repeated_noise_text(&object.text))
         .collect::<Vec<_>>();
     if objects.len() < original_count {
         warnings.push(format!(
@@ -547,7 +664,7 @@ fn infer_nodes_from_text_objects(
 
 fn infer_pdf_block_structure(nodes: Vec<AstNode>, warnings: &mut Vec<String>) -> Vec<AstNode> {
     let mut output = Vec::new();
-    let mut pending_list: Option<(bool, Vec<Vec<AstNode>>)> = None;
+    let mut pending_list: PdfPendingList = None;
 
     for node in nodes {
         let AstNode::Paragraph(text) = node else {
@@ -556,14 +673,14 @@ fn infer_pdf_block_structure(nodes: Vec<AstNode>, warnings: &mut Vec<String>) ->
             continue;
         };
 
-        if let Some((ordered, item)) = parse_pdf_list_item(&text) {
+        if let Some((ordered, marker, item)) = parse_pdf_list_item(&text) {
             match &mut pending_list {
                 Some((current_ordered, items)) if *current_ordered == ordered => {
-                    items.push(vec![AstNode::Text(item)]);
+                    items.push((marker, vec![AstNode::Text(item)]));
                 }
                 _ => {
                     flush_pending_pdf_list(&mut output, &mut pending_list, warnings);
-                    pending_list = Some((ordered, vec![vec![AstNode::Text(item)]]));
+                    pending_list = Some((ordered, vec![(marker, vec![AstNode::Text(item)])]));
                 }
             }
             continue;
@@ -582,48 +699,129 @@ fn infer_pdf_block_structure(nodes: Vec<AstNode>, warnings: &mut Vec<String>) ->
     }
 
     flush_pending_pdf_list(&mut output, &mut pending_list, warnings);
-    output
+    renumber_repeated_pdf_one_headings(output, warnings)
 }
 
 fn flush_pending_pdf_list(
     output: &mut Vec<AstNode>,
-    pending_list: &mut Option<(bool, Vec<Vec<AstNode>>)>,
+    pending_list: &mut PdfPendingList,
     warnings: &mut Vec<String>,
 ) {
     if let Some((ordered, items)) = pending_list.take() {
         if items.len() >= 2 {
+            if ordered
+                && items.iter().all(|(marker, _)| marker == "1")
+                && items.iter().all(|(marker, item)| {
+                    pdf_section_heading_level(&pdf_list_item_paragraph(ordered, marker, item))
+                        .is_some()
+                })
+            {
+                for (marker, item) in items {
+                    let paragraph = pdf_list_item_paragraph(ordered, &marker, &item);
+                    let level = pdf_section_heading_level(&paragraph).unwrap_or(2);
+                    warnings.push(format!(
+                        "PDF heading inference treated '{}' as h{} by repeated numbered item.",
+                        paragraph, level
+                    ));
+                    output.push(AstNode::Heading {
+                        level,
+                        text: paragraph,
+                    });
+                }
+                return;
+            }
             warnings.push(format!(
                 "PDF list inference grouped {} item(s).",
                 items.len()
             ));
-            output.push(AstNode::List { ordered, items });
+            output.push(AstNode::List {
+                ordered,
+                items: items.into_iter().map(|(_, item)| item).collect(),
+            });
         } else if let Some(item) = items.into_iter().next() {
-            let text = item
-                .into_iter()
-                .filter_map(|node| match node {
-                    AstNode::Text(text) => Some(text),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            let prefix = if ordered { "1. " } else { "- " };
-            output.push(AstNode::Paragraph(format!("{prefix}{text}")));
+            let paragraph = pdf_list_item_paragraph(ordered, &item.0, &item.1);
+            if ordered && let Some(level) = pdf_section_heading_level(&paragraph) {
+                warnings.push(format!(
+                    "PDF heading inference treated '{}' as h{} by single numbered item.",
+                    paragraph, level
+                ));
+                output.push(AstNode::Heading {
+                    level,
+                    text: paragraph,
+                });
+            } else {
+                output.push(AstNode::Paragraph(paragraph));
+            }
         }
     }
 }
 
-fn parse_pdf_list_item(text: &str) -> Option<(bool, String)> {
+fn pdf_list_item_paragraph(ordered: bool, marker: &str, item: &[AstNode]) -> String {
+    let text = item
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let prefix = if ordered {
+        format!("{marker}. ")
+    } else {
+        "- ".to_string()
+    };
+    format!("{prefix}{text}")
+}
+
+fn parse_pdf_list_item(text: &str) -> Option<(bool, String, String)> {
     let trimmed = text.trim();
     for marker in ["- ", "• ", "・ "] {
         if let Some(item) = trimmed.strip_prefix(marker) {
-            return Some((false, item.trim().to_string()));
+            return Some((false, marker.trim().to_string(), item.trim().to_string()));
         }
     }
     let (number, rest) = trimmed.split_once(". ")?;
     if !number.is_empty() && number.chars().all(|character| character.is_ascii_digit()) {
-        return Some((true, rest.trim().to_string()));
+        return Some((true, number.to_string(), rest.trim().to_string()));
     }
     None
+}
+
+fn renumber_repeated_pdf_one_headings(
+    nodes: Vec<AstNode>,
+    warnings: &mut Vec<String>,
+) -> Vec<AstNode> {
+    let repeated_one_count = nodes
+        .iter()
+        .filter(|node| match node {
+            AstNode::Heading { text, .. } => text.starts_with("1. "),
+            _ => false,
+        })
+        .count();
+    if repeated_one_count < 3 {
+        return nodes;
+    }
+
+    let mut next = 1;
+    nodes
+        .into_iter()
+        .map(|node| match node {
+            AstNode::Heading { level, text } if text.starts_with("1. ") => {
+                let rest = text.trim_start_matches("1. ").trim();
+                let renumbered = format!("{next}. {rest}");
+                next += 1;
+                warnings.push(format!(
+                    "PDF heading inference renumbered repeated heading '{}' to '{}'.",
+                    text, renumbered
+                ));
+                AstNode::Heading {
+                    level,
+                    text: renumbered,
+                }
+            }
+            other => other,
+        })
+        .collect()
 }
 
 fn pdf_section_heading_level(text: &str) -> Option<u8> {
@@ -637,16 +835,18 @@ fn pdf_section_heading_level(text: &str) -> Option<u8> {
             return Some(1);
         }
     }
-    let first = trimmed.split_whitespace().next()?;
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next()?;
+    let has_rest = parts.next().is_some();
     if first
         .chars()
         .all(|character| character.is_ascii_digit() || character == '.')
     {
-        let dot_count = first.chars().filter(|character| *character == '.').count();
-        if first.trim_matches('.').is_empty() || dot_count > 5 {
+        if !has_rest {
             return None;
         }
-        if first.ends_with('.') {
+        let dot_count = first.chars().filter(|character| *character == '.').count();
+        if first.trim_matches('.').is_empty() || dot_count > 5 {
             return None;
         }
         let has_digit = first.chars().any(|character| character.is_ascii_digit());
@@ -681,6 +881,47 @@ fn is_probably_human_text(text: &str) -> bool {
         return false;
     }
     true
+}
+
+fn is_pdf_repeated_noise_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if trimmed.chars().all(|character| character.is_ascii_digit()) && trimmed.chars().count() <= 4 {
+        return true;
+    }
+    if trimmed.contains('©') || trimmed.to_ascii_lowercase().contains("copyright") {
+        return true;
+    }
+    if looks_like_pdf_date_footer(trimmed) {
+        return true;
+    }
+    false
+}
+
+fn looks_like_pdf_date_footer(text: &str) -> bool {
+    let mut parts = text.split_whitespace();
+    let Some(date) = parts.next() else {
+        return false;
+    };
+    let Some(time) = parts.next() else {
+        return false;
+    };
+    parts.next().is_none()
+        && date.len() == 10
+        && date.chars().nth(4) == Some('/')
+        && date.chars().nth(7) == Some('/')
+        && time.len() == 5
+        && time.chars().nth(2) == Some(':')
+        && date
+            .chars()
+            .filter(|character| *character != '/')
+            .all(|character| character.is_ascii_digit())
+        && time
+            .chars()
+            .filter(|character| *character != ':')
+            .all(|character| character.is_ascii_digit())
 }
 
 pub fn infer_headings(text: &str) -> Vec<AstNode> {

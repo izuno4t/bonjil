@@ -54,7 +54,6 @@ impl Converter {
                 std::str::from_utf8(bytes).unwrap_or_default(),
                 &mut warnings,
             ),
-            "markdown" => vec![AstNode::RawHtml(String::from_utf8_lossy(bytes).to_string())],
             "pdf" => {
                 let mut result = pdf::parse_pdf_with_embedded_backend(bytes, &mut warnings);
                 if !pdf::is_encrypted_pdf(bytes)
@@ -80,6 +79,13 @@ impl Converter {
                 }
                 if result.ocr_required {
                     let diagnosis = pdf::diagnose_no_extractable_text(bytes);
+                    if pdf_result_contains_extracted_text(&result) {
+                        return Err(io::Error::other(format!(
+                            "PDF text extraction appears incomplete after trying Rust PDF backends. Last backend: {}. {}",
+                            result.backend,
+                            diagnosis.message()
+                        )));
+                    }
                     return Err(io::Error::other(format!(
                         "PDF text extraction produced no text after trying Rust PDF backends. Last backend: {}. {}",
                         result.backend,
@@ -323,17 +329,22 @@ impl Converter {
             .enumerate()
             .filter_map(|(index, objects)| objects.is_empty().then_some(index))
             .collect::<Vec<_>>();
-        if missing_pages.is_empty() {
+        let pages_requiring_ocr = if missing_pages.is_empty() && current_result.ocr_required {
+            (0..page_texts.len()).collect::<Vec<_>>()
+        } else {
+            missing_pages
+        };
+        if pages_requiring_ocr.is_empty() {
             return Ok(None);
         }
         let Some(backend) = ocr::backend_for_engine(&self.options.ocr)? else {
             return Ok(None);
         };
         warnings.push(format!(
-            "PDF OCR fallback selected for {} page(s) without extractable text.",
-            missing_pages.len()
+            "PDF OCR fallback selected for {} page(s) requiring OCR.",
+            pages_requiring_ocr.len()
         ));
-        let ocr_pages = ocr::recognize_pdf_pages(bytes, &missing_pages, backend.as_ref())?;
+        let ocr_pages = ocr::recognize_pdf_pages(bytes, &pages_requiring_ocr, backend.as_ref())?;
         let mut ocr_by_page = std::collections::BTreeMap::new();
         for (page_index, text) in ocr_pages {
             ocr_by_page.insert(page_index, text);
@@ -341,7 +352,7 @@ impl Converter {
 
         let mut objects = Vec::new();
         for (page_index, page_objects) in page_texts.into_iter().enumerate() {
-            if page_objects.is_empty() {
+            if page_objects.is_empty() || ocr_by_page.contains_key(&page_index) {
                 if let Some(text) = ocr_by_page.get(&page_index) {
                     objects.extend(
                         text.lines()
@@ -367,7 +378,7 @@ impl Converter {
             ast: pdf::infer_nodes_from_pdf_text_objects(objects, warnings),
             backend: format!("{}+{}", current_result.backend, ocr_name(&self.options.ocr)),
             extraction_failed: current_result.extraction_failed,
-            ocr_required: true,
+            ocr_required: false,
         }))
     }
 }
@@ -380,6 +391,21 @@ fn validate_media_options(options: &ConversionOptions) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+fn pdf_result_contains_extracted_text(result: &pdf::PdfParseResult) -> bool {
+    result.ast.iter().any(|node| match node {
+        AstNode::Paragraph(text) | AstNode::Text(text) => {
+            !text.starts_with("PDF text extraction produced no text")
+        }
+        AstNode::Heading { .. }
+        | AstNode::List { .. }
+        | AstNode::Table { .. }
+        | AstNode::Image { .. }
+        | AstNode::CodeBlock { .. }
+        | AstNode::Footnote { .. }
+        | AstNode::RawHtml(_) => true,
+    })
 }
 
 fn unzip_part(path: &Path, part: &str) -> io::Result<String> {

@@ -269,9 +269,6 @@ bonjil input.pdf --llm claude-opus --restructure -o out.md
 
 # 翻訳付き
 bonjil input.pdf --llm claude-opus --translate ja -o out.md
-
-# 翻訳のみ (既存 Markdown を翻訳)
-bonjil input.md --llm claude-opus --translate en -o out.en.md
 ```
 
 サポートする LLM バックエンド:

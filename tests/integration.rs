@@ -559,6 +559,17 @@ fn reports_unsupported_formats_without_external_calls() {
 }
 
 #[test]
+fn markdown_input_is_not_a_supported_conversion_source() {
+    let converter = Converter::new();
+    let result = converter
+        .convert_bytes("notes.md", b"# Already markdown")
+        .unwrap();
+
+    assert_eq!(result.report.input_format, "md");
+    assert!(result.markdown.contains("Unsupported input format: md"));
+}
+
+#[test]
 fn converts_pptx_slide_xml_bytes_to_markdown() {
     let slide = include_bytes!("fixtures/unit/pptx/simple-slide.slide.xml");
     let expected = include_str!("fixtures/unit/pptx/simple-slide.expected.md");

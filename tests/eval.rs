@@ -56,6 +56,36 @@ fn structure_fidelity_detects_heading_level_and_table_cell_loss() {
 }
 
 #[test]
+fn structure_fidelity_penalizes_unexpected_extra_nodes() {
+    let expected = vec![
+        AstNode::Heading {
+            level: 1,
+            text: "Title".to_string(),
+        },
+        AstNode::Paragraph("Body".to_string()),
+    ];
+    let actual = vec![
+        AstNode::Heading {
+            level: 1,
+            text: "Title".to_string(),
+        },
+        AstNode::Paragraph("Body".to_string()),
+        AstNode::Paragraph("Unexpected".to_string()),
+    ];
+
+    let score = evaluate_structure_fidelity(&expected, &actual);
+
+    assert_eq!(score.errors, 1);
+    assert!((score.score - 0.6666666666666667).abs() < f64::EPSILON);
+    assert!(
+        score
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("edit distance 1 over 3 structural node(s)"))
+    );
+}
+
+#[test]
 fn lint_score_detects_common_markdown_layout_errors() {
     let markdown = "# Title\nBody\n- item\n| A | B |\n| --- | --- |\n";
 

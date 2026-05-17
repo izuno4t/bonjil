@@ -211,6 +211,48 @@ fn pdf_parser_accepts_replaceable_text_backend() {
 }
 
 #[test]
+fn pdf_parser_marks_incomplete_cid_font_text_as_ocr_required() {
+    struct PartialJapaneseBackend;
+
+    impl PdfTextBackend for PartialJapaneseBackend {
+        fn name(&self) -> &str {
+            "partial-japanese"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![pdf::PdfTextObject {
+                    text: "Vol.157 AI".to_string(),
+                    font_size: None,
+                    x: None,
+                    y: None,
+                }],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let bytes = b"%PDF-1.7
+1 0 obj
+<< /Type /Font /Subtype /Type0 /Encoding /Identity-H /BaseFont /AAAAAD+HiraKakuProN-W3 >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type0 /Encoding /Identity-H /BaseFont /AAAAAG+HiraMinProN-W3 >>
+endobj";
+    let mut warnings = Vec::new();
+
+    let result = pdf::parse_pdf_with_backend(bytes, &PartialJapaneseBackend, &mut warnings);
+
+    assert!(result.ocr_required);
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| { warning.contains("CID fonts lack Unicode maps") })
+    );
+}
+
+#[test]
 fn pdf_parser_tries_next_backend_when_primary_extracts_no_text() {
     struct EmptyBackend;
     struct TextBackend;
@@ -419,5 +461,135 @@ fn pdf_section_number_in_sentence_is_not_promoted_to_heading() {
     assert_eq!(
         result.ast,
         vec![AstNode::Paragraph("1. VPNを設定します。".to_string())]
+    );
+}
+
+#[test]
+fn pdf_repeated_page_noise_is_not_promoted_or_kept() {
+    struct LinesOnlyBackend;
+
+    impl PdfTextBackend for LinesOnlyBackend {
+        fn name(&self) -> &str {
+            "lines-only"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![
+                    pdf::PdfTextObject {
+                        text: "GitHub Copilot のテクニック集".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "3".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "© ZOZO, Inc.".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "2026/04/03 17:44".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "1. ショートカットの活用".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                ],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+
+    let result = pdf::parse_pdf_with_backend(b"%PDF-1.7", &LinesOnlyBackend, &mut warnings);
+
+    assert_eq!(
+        result.ast,
+        vec![
+            AstNode::Paragraph("GitHub Copilot のテクニック集".to_string()),
+            AstNode::Heading {
+                level: 2,
+                text: "1. ショートカットの活用".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn pdf_repeated_one_headings_are_renumbered_in_order() {
+    struct LinesOnlyBackend;
+
+    impl PdfTextBackend for LinesOnlyBackend {
+        fn name(&self) -> &str {
+            "lines-only"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![
+                    pdf::PdfTextObject {
+                        text: "1. ショートカットの活用".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "1. Neighboring Tabs の活用".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "1. 記号の活用".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                ],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+
+    let result = pdf::parse_pdf_with_backend(b"%PDF-1.7", &LinesOnlyBackend, &mut warnings);
+
+    assert_eq!(
+        result.ast,
+        vec![
+            AstNode::Heading {
+                level: 2,
+                text: "1. ショートカットの活用".to_string(),
+            },
+            AstNode::Heading {
+                level: 2,
+                text: "2. Neighboring Tabs の活用".to_string(),
+            },
+            AstNode::Heading {
+                level: 2,
+                text: "3. 記号の活用".to_string(),
+            },
+        ]
+    );
+    assert!(
+        warnings.iter().any(|warning| {
+            warning.contains("PDF heading inference renumbered repeated heading")
+        })
     );
 }

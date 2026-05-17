@@ -1,4 +1,6 @@
 AGENTS
+AAAAAD
+AAAAAG
 AsciiDoc
 AutoGen
 Bonjil
@@ -25,6 +27,8 @@ GFM
 HackMD
 HedgeDoc
 hayro
+Heisei
+Hira
 insta
 ipsj
 izuno
@@ -32,6 +36,7 @@ imagedata
 JATS
 json
 justfile
+Kaku
 Koten
 koten
 Kotlin
@@ -43,6 +48,7 @@ markdownlint
 MarkItDown
 MinerU
 mhlw
+Mincho
 mwilliamson
 mypy
 NDLOCR
@@ -93,3 +99,4 @@ VLM
 WebVTT
 XBRL
 XHTML
+ZOZO

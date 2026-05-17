@@ -8,9 +8,8 @@ use std::time::Instant;
 
 use bonjil::{ConversionOptions, Converter, Flavor};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "pdf", "html", "htm", "docx", "pptx", "xlsx", "epub", "md", "txt",
-];
+const SUPPORTED_EXTENSIONS: &[&str] =
+    &["pdf", "html", "htm", "docx", "pptx", "xlsx", "epub", "txt"];
 
 fn main() {
     if let Err(error) = run() {
