@@ -1163,6 +1163,7 @@ pub mod office {
             && items
                 .iter()
                 .all(|item| item.x == 0 && item.y == 0 && item.source == "shape")
+            && !slide_xml.contains("<p:ph")
         {
             return parse_pptx_legacy_text_order(slide_xml);
         }
@@ -1463,10 +1464,28 @@ pub mod pdf {
                 break;
             };
             let block = &after_start[..end];
-            objects.extend(extract_block_text_objects(block));
+            if is_probably_text_block(block) {
+                objects.extend(extract_block_text_objects(block));
+            }
             rest = &after_start[end + 2..];
         }
         objects
+    }
+
+    fn is_probably_text_block(block: &str) -> bool {
+        let char_count = block.chars().count().max(1);
+        let replacement_count = block
+            .chars()
+            .filter(|character| *character == '\u{fffd}')
+            .count();
+        let control_count = block
+            .chars()
+            .filter(|character| {
+                character.is_control() && !matches!(character, '\n' | '\r' | '\t')
+            })
+            .count();
+        (replacement_count <= 20 || replacement_count * 20 <= char_count)
+            && control_count * 10 <= char_count
     }
 
     fn extract_block_text_objects(block: &str) -> Vec<TextObject> {
@@ -1536,6 +1555,17 @@ pub mod pdf {
         objects: Vec<TextObject>,
         warnings: &mut Vec<String>,
     ) -> Vec<AstNode> {
+        let original_count = objects.len();
+        let objects = objects
+            .into_iter()
+            .filter(|object| is_probably_human_text(&object.text))
+            .collect::<Vec<_>>();
+        if objects.len() < original_count {
+            warnings.push(format!(
+                "PDF parser skipped {} binary-like text fragment(s).",
+                original_count - objects.len()
+            ));
+        }
         let max_font_size = objects
             .iter()
             .filter_map(|object| object.font_size)
@@ -1566,6 +1596,29 @@ pub mod pdf {
                 }
             })
             .collect()
+    }
+
+    fn is_probably_human_text(text: &str) -> bool {
+        if text.chars().filter(|character| *character == '\u{fffd}').count() >= 2 {
+            return false;
+        }
+        let char_count = text.chars().count();
+        if char_count == 0 {
+            return false;
+        }
+        let control_count = text
+            .chars()
+            .filter(|character| {
+                character.is_control() && !matches!(character, '\n' | '\r' | '\t')
+            })
+            .count();
+        if control_count * 4 > char_count {
+            return false;
+        }
+        if char_count > 4000 && !text.chars().any(|character| character.is_whitespace()) {
+            return false;
+        }
+        true
     }
 
     pub fn infer_headings(text: &str) -> Vec<AstNode> {

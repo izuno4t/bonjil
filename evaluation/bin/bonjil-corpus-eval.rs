@@ -31,6 +31,7 @@ fn run() -> io::Result<()> {
     }
 
     let summary = summarize(&cases);
+    fs::write(output_root.join("review-index.md"), render_review_index(&summary, &cases))?;
     if let Some(parent) = args.out.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -352,8 +353,10 @@ fn run_external_tool_in_docker(
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "output path has no parent"))?;
     fs::create_dir_all(output_dir)?;
-    let mount = format!("{}:/input:ro", parent.display());
-    let output_mount = format!("{}:/output", output_dir.display());
+    let input_mount_path = fs::canonicalize(parent)?;
+    let output_mount_path = fs::canonicalize(output_dir)?;
+    let mount = format!("{}:/input:ro", input_mount_path.display());
+    let output_mount = format!("{}:/output", output_mount_path.display());
     let image = docker_image(tool);
     let mut command = Command::new("docker");
     command
@@ -483,6 +486,46 @@ fn render_report(root: &Path, summary: &Summary, cases: &[CaseResult]) -> String
         render_summary(summary),
         cases.iter().map(render_case).collect::<Vec<_>>().join(",")
     )
+}
+
+fn render_review_index(summary: &Summary, cases: &[CaseResult]) -> String {
+    let mut output = String::new();
+    output.push_str("# Corpus Evaluation Review Index\n\n");
+    output.push_str("## Summary\n\n");
+    output.push_str(&format!("- Total files: {}\n", summary.total_files));
+    output.push_str(&format!("- Bonjil wins: {}\n", summary.bonjil_wins));
+    output.push_str(&format!(
+        "- Superiority claim: `{}`\n\n",
+        summary.superiority_claim
+    ));
+    output.push_str("## Cases\n\n");
+    output.push_str("| Input | Winner | Judgment | Outputs |\n");
+    output.push_str("| ---- | ---- | ---- | ---- |\n");
+    for case in cases {
+        let outputs = case
+            .results
+            .iter()
+            .filter_map(|result| {
+                result.output_path.as_ref().map(|path| {
+                    format!(
+                        "{}: `{}` ({})",
+                        result.tool,
+                        path.display(),
+                        result.status
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("<br>");
+        output.push_str(&format!(
+            "| `{}` | {} | `{}` | {} |\n",
+            case.input.display(),
+            case.winner.as_deref().unwrap_or("-"),
+            case.judgment,
+            outputs
+        ));
+    }
+    output
 }
 
 fn render_summary(summary: &Summary) -> String {

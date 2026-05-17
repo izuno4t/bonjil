@@ -20,6 +20,7 @@ endobj
 endstream
 EPUB
 FastAPI
+fffd
 GFM
 HackMD
 HedgeDoc

@@ -31,6 +31,9 @@ fn corpus_eval_outputs_comparison_report() {
     assert!(report.contains("\"summary\""));
     assert!(report.contains("\"superiority_claim\""));
     assert!(fs::read_dir("target/corpus-eval-test/outputs/bonjil").is_ok());
+    let index = fs::read_to_string("target/corpus-eval-test/outputs/review-index.md").unwrap();
+    assert!(index.contains("# Corpus Evaluation Review Index"));
+    assert!(index.contains("sample.html"));
 }
 
 #[test]

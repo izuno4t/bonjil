@@ -60,6 +60,52 @@ cargo run --bin bonjil-corpus-eval -- \
 | PCORPUS-006 | PDF | 大阪大学PDFもバイナリ断片と日本語抽出問題がある。 |
 | PCORPUS-007 | XLSX | sharedStrings未解決に見える数値が出ている。 |
 | PCORPUS-008 | XLSX | 実体がHTMLで、入力妥当性確認の対象にする。 |
+| PCORPUS-010 | XLSX | sharedStrings内のふりがなが本文へ混入した。 |
+| PCORPUS-012 | PDF | 冊子PDFでバイナリ断片が本文として抽出された。 |
+| PCORPUS-013 | PPTX | 日本語文がrun単位で改行され、単語と文が割れた。 |
+| PCORPUS-014 | PPTX | 画像と近傍説明の対応はまだreportで追跡できない。 |
+
+## 2026-05-17 追加対応
+
+- 厚労省XLSX由来のふりがな混入を `phonetic-shared-string` fixtureへ落とし、
+  sharedStringsの `rPh` を本文から除外した。
+- 明治大学PPTX由来の日本語run分割を `split-run-japanese` fixtureへ落とし、
+  同一段落内のrunは結合するようにした。
+- PDFの明らかなバイナリ断片はスキップするようにしたが、冊子PDFにはまだ
+  フォント名や短い断片が残るため、TASK-049は未完了のままにする。
+
+## 2026-05-17 外部ツール比較
+
+実行コマンド:
+
+```bash
+cargo run --bin bonjil-corpus-eval -- \
+  --root evaluation/inputs/japanese-university \
+  --out evaluation/reports/japanese-university-tools.json \
+  --output-root evaluation/outputs/japanese-university-tools \
+  --limit 6 \
+  --per-ext 6 \
+  --tools markitdown,pymupdf4llm,mammoth-js,pandoc
+```
+
+観測:
+
+- `meiji-sample-graph.xlsx` は自動指標上bonjilが最上位だった。
+- PPTX、PDF、複数XLSXではPandoc、PyMuPDF4LLM、MarkItDownが上位だった。
+- Mammoth.jsはDOCXでは成功し、PPTX/XLSX/PDFでは対象外エラーになった。
+- 自動指標だけでは優位性を確定できないため、人手レビューが必要。
+
+## 優位性獲得の問題点
+
+| 問題 | 既存ツールとの差 | 対応タスク |
+| ---- | ---- | ---- |
+| PDF本文抽出が弱い | PyMuPDF4LLMは日本語PDF本文を多く保持した | TASK-054 |
+| PDF構造推定が弱い | PyMuPDF4LLMは見出し/listを多く出した | TASK-055 |
+| PPTX本文構造が薄い | PandocはPPTXの構造量がわずかに多い | TASK-056 |
+| XLSX表範囲が弱い | MarkItDown/Pandocは表数が多い | TASK-057 |
+| DOCX意味構造が同等止まり | Mammoth.jsとの差別化要素が少ない | TASK-058 |
+| media対応が説明不足 | 画像とcaption候補をreportで比較できない | TASK-059 |
+| 優位性判定が曖昧 | 自動スコアだけでは正しさを判定できない | TASK-053 |
 
 日本語fixtureでは、少なくとも次を含める。
 

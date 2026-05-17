@@ -94,6 +94,14 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 | TASK-050 | 🚧 | 実装する図表キャプションとメディア対応付け | TASK-047,TASK-049 |
 | TASK-051 | ✅ | 整備する公開ベンチ準拠の評価ルーブリック | TASK-045,TASK-050 |
 | TASK-052 | 🚧 | 比較する実コーパス評価レポート | TASK-051 |
+| TASK-053 | ⏳ | 作成する優位性判定用goldenレビュー表 | TASK-052 |
+| TASK-054 | ⏳ | 実装するPDFテキスト抽出バックエンド切替 | TASK-053 |
+| TASK-055 | ⏳ | 実装するPDF見出しリスト読順復元 | TASK-054 |
+| TASK-056 | ⏳ | 実装するPPTX本文構造とlist復元 | TASK-053 |
+| TASK-057 | ⏳ | 実装するXLSX表範囲と複数sheet出力 | TASK-053 |
+| TASK-058 | ⏳ | 実装するDOCX style mapと注釈復元 | TASK-053 |
+| TASK-059 | ⏳ | 実装するmedia caption候補report | TASK-056,TASK-058 |
+| TASK-060 | ⏳ | 判定する公式コーパス優位性レポート | TASK-055,TASK-057,TASK-059 |
 
 ## タスク詳細（補足が必要な場合のみ）
 
@@ -353,6 +361,8 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: 段落、見出し、リスト、脚注、複数カラム、罫線あり/なし表、ヘッダー/フッター、ページ番号。
 - 成果: tag tree利用有無、座標推定の信頼度、除外したartifact、fallback理由をreportに出す。
 - 注意: 抽出失敗時に無警告のプレーンテキストへ潰さず、失われた構造を明示する。
+- 進捗: 明らかなバイナリ断片のスキップfixtureを追加したが、
+  公式冊子PDFでは短い断片が残るため未完了。
 
 ### TASK-050
 
@@ -360,6 +370,8 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: Officeの図表番号、PDFの近傍キャプション、画像入りセル、スライド上の画像説明、複数候補。
 - 成果: Markdown本文、media出力、report JSONで同じmedia idを参照できるようにする。
 - 注意: 対応が曖昧な場合は単一決定せず、候補、距離、ページ/スライド、確信度をreportに残す。
+- 進捗: PPTX画像参照はMarkdownへ出るが、近傍説明との候補一覧は
+  report化できていないため未完了。
 
 ### TASK-051
 
@@ -375,6 +387,71 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 成果: `evaluation/outputs/` にMarkdown、tool report、差分、
   目視レビュー用indexを出し、`evaluation/reports/` に集計を残す。
 - 注意: `evaluation/inputs`、`evaluation/outputs`、`evaluation/reports` の実データはGit管理外にし、CIでは実コーパス評価を実行しない。
+- 進捗: review-index自動生成を追加した。外部Dockerツールを含む
+  大学公開文書6件の横並び比較を実行した。公式文書と100件規模の比較は未完了。
+
+### TASK-053
+
+- 補足: 自動スコアだけでは優位性を判定しない。実コーパスごとに、期待する
+  見出し、本文、表、画像、caption、warningを人手レビュー表に固定する。
+- 対象: `japanese-university-tools` と `japanese-official-expanded` の代表例。
+- 成果: `evaluation/reports/` にgoldenレビュー表と判定基準を出す。
+- 注意: 既存ツールの出力を正解にせず、入力文書から期待構造を決める。
+
+### TASK-054
+
+- 補足: 現状PDFは簡易parserで、PyMuPDF4LLMに大きく劣る。テキスト抽出を
+  外部backendまたは内部抽出層へ切り替え可能にする。
+- 対象: 日本語PDF、スライド由来PDF、冊子PDF、画像PDF。
+- 成果: backend名、抽出失敗、OCR要否をreportに出す。
+- 注意: PDF入力で無意味な短い断片を本文として採用しない。
+
+### TASK-055
+
+- 補足: PyMuPDF4LLMが保持した見出し/listをbonjilでも復元する。
+- 対象: font size、座標、行間、箇条書き記号、ページ内読順。
+- 成果: PDF出力でheading/list/paragraphを区別し、理由をwarningへ残す。
+- 注意: スコア稼ぎのために過剰に見出し化しない。
+
+### TASK-056
+
+- 補足: PPTXでPandocが上位になった差分を、本文構造、箇条書き、notes、
+  shape groupingの復元として埋める。
+- 対象: title/body/footer、list階層、グループ図形、notes slide。
+- 成果: PPTX fixtureと実コーパスでPandoc同等以上の構造を出す。
+- 注意: 画像だけを増やして本文構造を落とさない。
+
+### TASK-057
+
+- 補足: XLSXでMarkItDown/Pandocが上位になった差分を、表範囲検出と
+  sheet単位出力の改善として埋める。
+- 対象: used range、空行空列、複数sheet、chart元データ、表タイトル。
+- 成果: sheet見出し、表範囲、表本文をMarkdown tableへ出す。
+- 注意: 帳票型の位置情報を単純な一次元テキストへ潰さない。
+
+### TASK-058
+
+- 補足: DOCXで既存ツールと同等止まりのため、style map、脚注、URL、
+  注釈を構造として復元する。
+- 対象: heading style、caption style、footnote、hyperlink、comment。
+- 成果: DOCXでMammoth/Pandoc同等以上の意味構造を出す。
+- 注意: Word固有style名に過剰依存せず、未対応styleはreportへ出す。
+
+### TASK-059
+
+- 補足: 現状は画像参照は出るが、caption候補と距離、ページ/スライド、
+  media idの対応をreportで比較できない。
+- 対象: PPTX picture、DOCX drawing、PDF figure近傍テキスト。
+- 成果: `media_candidates` 相当のreport項目とfixtureを追加する。
+- 注意: 曖昧な候補を単一captionとして断定しない。
+
+### TASK-060
+
+- 補足: 改善後に、公式/大学/補助コーパスを同一コマンドで再評価し、
+  bonjilが優れる事例と劣る事例を分けて報告する。
+- 対象: PDF、PPTX、XLSX、DOCXの公開コーパス。
+- 成果: `evaluation/reports/` に人手レビュー込みの優位性レポートを出す。
+- 注意: `superiority_claim` は根拠が揃うまでprovenにしない。
 
 ## Backlog一覧
 
