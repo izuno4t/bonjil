@@ -1,7 +1,7 @@
 use bonjil::{
     AstNode, ConversionOptions, Converter, Flavor, OutputFormat, TableCell, TableRow, docx,
     evaluate_heading_recall, evaluate_lint_score, evaluate_structure_fidelity,
-    evaluate_table_integrity, evaluate_translation_structure_preserve, markdown, office,
+    evaluate_table_integrity, evaluate_translation_structure_preserve, markdown, ooxml,
 };
 use std::fs;
 use std::io::{Cursor, Write};
@@ -25,6 +25,55 @@ fn converts_ast_to_commonmark() {
     let actual = markdown::write_markdown(&ast, Flavor::CommonMark);
 
     assert_eq!(actual, "# Title\n\nHello world\n\n- item\n");
+}
+
+#[test]
+fn markdown_writer_normalizes_lint_sensitive_output() {
+    let long_text = "これは非常に長い説明文です".repeat(12);
+    let ast = vec![
+        AstNode::Paragraph("【手順書】GlobalProtect MacOS 操作手順書".to_string()),
+        AstNode::Paragraph(format!(
+            "{long_text} https://info2.nri-net.com/cgi-bin/sample nc-info-admin-all@nri-net.com"
+        )),
+    ];
+
+    let actual = markdown::write_markdown(&ast, Flavor::Markdownlint);
+
+    assert!(actual.starts_with("# 【手順書】GlobalProtect MacOS 操作手順書\n"));
+    assert!(actual.lines().all(|line| line.chars().count() <= 80));
+    assert!(actual.contains("<https://info2.nri-net.com/cgi-bin/sample>"));
+    assert!(actual.contains("<nc-info-admin-all@nri-net.com>"));
+}
+
+#[test]
+fn markdown_writer_keeps_single_h1() {
+    let ast = vec![
+        AstNode::Heading {
+            level: 1,
+            text: "Document".to_string(),
+        },
+        AstNode::Heading {
+            level: 1,
+            text: "Section".to_string(),
+        },
+        AstNode::List {
+            ordered: false,
+            items: vec![vec![AstNode::Heading {
+                level: 1,
+                text: "Nested".to_string(),
+            }]],
+        },
+    ];
+
+    let actual = markdown::write_markdown(&ast, Flavor::Markdownlint);
+
+    assert_eq!(actual.matches("\n# ").count(), 0);
+    assert_eq!(
+        actual.lines().filter(|line| line.starts_with("# ")).count(),
+        1
+    );
+    assert!(actual.contains("## Section"));
+    assert!(actual.contains("## Nested"));
 }
 
 #[test]
@@ -95,6 +144,11 @@ fn conversion_report_lists_referenced_media() {
         .unwrap();
 
     assert_eq!(result.report.media, vec!["media/chart.png".to_string()]);
+    assert_eq!(result.report.media_candidates.len(), 1);
+    assert_eq!(
+        result.report.media_candidates[0].caption.as_deref(),
+        Some("Figure 1")
+    );
 }
 
 #[test]
@@ -118,6 +172,8 @@ fn conversion_report_json_lists_used_features() {
     assert!(report.contains("\"ocr:ndlocr-lite\""));
     assert!(report.contains("\"extract_media\""));
     assert!(report.contains("\"media:referenced\""));
+    assert!(report.contains("\"media_candidates\""));
+    assert!(report.contains("\"caption\":\"Figure 1\""));
 }
 
 #[test]
@@ -412,13 +468,58 @@ fn parses_docx_heading_paragraph_list_fixture() {
 }
 
 #[test]
+fn parses_docx_hyperlinks_footnotes_and_comments() {
+    let xml = r#"
+        <w:document><w:body>
+          <w:p>
+            <w:r><w:t>See reference </w:t></w:r>
+            <w:hyperlink r:id="rLink"><w:r><w:t>site</w:t></w:r></w:hyperlink>
+            <w:r><w:footnoteReference w:id="2"/></w:r>
+            <w:r><w:commentReference w:id="4"/></w:r>
+          </w:p>
+        </w:body></w:document>
+    "#;
+    let rels =
+        r#"<Relationships><Relationship Id="rLink" Target="https://example.com"/></Relationships>"#;
+    let footnotes = r#"
+        <w:footnotes>
+          <w:footnote w:id="2"><w:p><w:r><w:t>Footnote text</w:t></w:r></w:p></w:footnote>
+        </w:footnotes>
+    "#;
+    let comments = r#"
+        <w:comments>
+          <w:comment w:id="4"><w:p><w:r><w:t>Comment text</w:t></w:r></w:p></w:comment>
+        </w:comments>
+    "#;
+    let mut warnings = Vec::new();
+
+    let ast =
+        docx::parse_document_xml_with_rels_and_notes(xml, rels, footnotes, comments, &mut warnings);
+
+    assert_eq!(
+        ast,
+        vec![
+            AstNode::Paragraph("See reference site <https://example.com>".to_string()),
+            AstNode::Footnote {
+                label: "2".to_string(),
+                text: "Footnote text".to_string(),
+            },
+            AstNode::Footnote {
+                label: "comment:4".to_string(),
+                text: "Comment text".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn parses_xlsx_and_pptx_xml_to_structured_ast() {
     let shared = include_str!("fixtures/unit/xlsx/shared-strings.xml");
     let sheet = include_str!("fixtures/unit/xlsx/shared-string-sheet.worksheet.xml");
     let slide = include_str!("fixtures/unit/pptx/simple-slide.slide.xml");
 
-    let xlsx = office::parse_xlsx_sheet_xml(sheet, shared);
-    let pptx = office::parse_pptx_slide_xml(slide);
+    let xlsx = ooxml::parse_xlsx_sheet_xml(sheet, shared);
+    let pptx = ooxml::parse_pptx_slide_xml(slide);
 
     assert!(matches!(xlsx.first(), Some(AstNode::Table { .. })));
     assert_eq!(
@@ -433,7 +534,7 @@ fn parses_pptx_visual_order_from_shape_coordinates() {
     let expected = include_str!("fixtures/unit/pptx/visual-order-shapes.expected.md");
     let mut warnings = Vec::new();
 
-    let ast = office::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
+    let ast = ooxml::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
     let rendered = markdown::write_markdown(&ast, Flavor::CommonMark);
 
     assert_eq!(rendered, expected);
@@ -450,10 +551,56 @@ fn parses_pptx_split_runs_without_breaking_japanese_words() {
     let expected = include_str!("fixtures/unit/pptx/split-run-japanese.expected.md");
     let mut warnings = Vec::new();
 
-    let ast = office::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
+    let ast = ooxml::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
     let rendered = markdown::write_markdown(&ast, Flavor::CommonMark);
 
     assert_eq!(rendered, expected);
+}
+
+#[test]
+fn parses_pptx_body_bullets_as_markdown_list() {
+    let slide = r#"
+<p:sld>
+  <p:cSld><p:spTree>
+    <p:sp>
+      <p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:txBody><a:p><a:r><a:t>VPN Setup</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+    <p:sp>
+      <p:nvSpPr><p:nvPr><p:ph type="body"/></p:nvPr></p:nvSpPr>
+      <p:txBody>
+        <a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:t>Install client</a:t></a:r></a:p>
+        <a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:t>Import certificate</a:t></a:r></a:p>
+      </p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+</p:sld>
+"#;
+    let mut warnings = Vec::new();
+
+    let ast = ooxml::parse_pptx_slide_xml_with_rels(slide, "", &mut warnings);
+
+    assert_eq!(
+        ast,
+        vec![
+            AstNode::Heading {
+                level: 1,
+                text: "VPN Setup".to_string(),
+            },
+            AstNode::List {
+                ordered: false,
+                items: vec![
+                    vec![AstNode::Text("Install client".to_string())],
+                    vec![AstNode::Text("Import certificate".to_string())],
+                ],
+            },
+        ]
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("pptx list structure restored"))
+    );
 }
 
 #[test]
@@ -463,7 +610,7 @@ fn parses_xlsx_merged_headers_inline_strings_and_formula_values() {
     let expected = include_str!("fixtures/unit/xlsx/merged-header-sheet.expected.md");
     let mut warnings = Vec::new();
 
-    let ast = office::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
+    let ast = ooxml::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
     let rendered = markdown::write_markdown(&ast, Flavor::Gfm);
 
     assert_eq!(rendered, expected);
@@ -482,10 +629,99 @@ fn parses_xlsx_shared_strings_without_phonetic_readings() {
     let expected = include_str!("fixtures/unit/xlsx/phonetic-shared-string.expected.md");
     let mut warnings = Vec::new();
 
-    let ast = office::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
+    let ast = ooxml::parse_xlsx_sheet_xml_with_warnings(sheet, shared, &mut warnings);
     let rendered = markdown::write_markdown(&ast, Flavor::Gfm);
 
     assert_eq!(rendered, expected);
+}
+
+#[test]
+fn trims_xlsx_empty_table_edges() {
+    let sheet = r#"
+        <worksheet><sheetData>
+          <row r="1"><c r="A1"><v></v></c><c r="B1"><v></v></c><c r="C1"><v></v></c></row>
+          <row r="2"><c r="A2"><v></v></c><c r="B2" t="inlineStr"><is><t>Name</t></is></c><c r="C2" t="inlineStr"><is><t>Value</t></is></c></row>
+          <row r="3"><c r="A3"><v></v></c><c r="B3" t="inlineStr"><is><t>VPN</t></is></c><c r="C3"><v>1</v></c></row>
+          <row r="4"><c r="A4"><v></v></c><c r="B4"><v></v></c><c r="C4"><v></v></c></row>
+        </sheetData></worksheet>
+    "#;
+
+    let ast = ooxml::parse_xlsx_sheet_xml(sheet, "");
+
+    assert_eq!(
+        ast,
+        vec![AstNode::Table {
+            rows: vec![
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            text: "Name".to_string(),
+                            rowspan: 1,
+                            colspan: 1,
+                            image: None,
+                        },
+                        TableCell {
+                            text: "Value".to_string(),
+                            rowspan: 1,
+                            colspan: 1,
+                            image: None,
+                        },
+                    ],
+                },
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            text: "VPN".to_string(),
+                            rowspan: 1,
+                            colspan: 1,
+                            image: None,
+                        },
+                        TableCell {
+                            text: "1".to_string(),
+                            rowspan: 1,
+                            colspan: 1,
+                            image: None,
+                        },
+                    ],
+                },
+            ],
+        }]
+    );
+}
+
+#[test]
+fn converts_xlsx_multiple_sheets_with_sheet_headings() {
+    let root = Path::new("target/xlsx-multiple-sheets-test");
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root.join("xl/worksheets")).unwrap();
+    fs::write(
+        root.join("xl/worksheets/sheet1.xml"),
+        r#"<worksheet><sheetData><row><c t="inlineStr"><is><t>Name</t></is></c></row></sheetData></worksheet>"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("xl/worksheets/sheet2.xml"),
+        r#"<worksheet><sheetData><row><c t="inlineStr"><is><t>Status</t></is></c></row></sheetData></worksheet>"#,
+    )
+    .unwrap();
+    let xlsx = root.join("sample.xlsx");
+    zip_fixture(
+        root,
+        &xlsx,
+        &["xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"],
+    );
+
+    let result = Converter::new().convert_file(&xlsx).unwrap();
+
+    assert!(result.markdown.contains("# Sheet 1"));
+    assert!(result.markdown.contains("# Sheet 2"));
+    assert!(
+        result
+            .report
+            .metadata
+            .iter()
+            .any(|(key, value)| key == "worksheets" && value == "2")
+    );
 }
 
 #[test]

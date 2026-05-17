@@ -90,22 +90,31 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 | TASK-046 | ✅ | 実装するOOXMLパッケージ部品解決 | TASK-045 |
 | TASK-047 | ✅ | 実装するPresentationML視覚順序と図形構造復元 | TASK-046 |
 | TASK-048 | ✅ | 実装するSpreadsheetML表構造復元 | TASK-046 |
-| TASK-049 | 🚧 | 実装するPDF論理構造とレイアウト読順復元 | TASK-045 |
-| TASK-050 | 🚧 | 実装する図表キャプションとメディア対応付け | TASK-047,TASK-049 |
+| TASK-049 | ✅ | 実装するPDF論理構造とレイアウト読順復元 | TASK-045 |
+| TASK-050 | ✅ | 実装する図表キャプションとメディア対応付け | TASK-047,TASK-049 |
 | TASK-051 | ✅ | 整備する公開ベンチ準拠の評価ルーブリック | TASK-045,TASK-050 |
 | TASK-052 | ✅ | 比較する実コーパス評価レポート | TASK-051 |
 | TASK-053 | ✅ | 作成する優位性判定用goldenレビュー表 | TASK-052 |
 | TASK-054 | ✅ | 実装するPDFテキスト抽出バックエンド切替 | TASK-053 |
-| TASK-055 | 🚧 | 実装するPDF見出しリスト読順復元 | TASK-054 |
-| TASK-056 | ⏳ | 実装するPPTX本文構造とlist復元 | TASK-053 |
-| TASK-057 | ⏳ | 実装するXLSX表範囲と複数sheet出力 | TASK-053 |
-| TASK-058 | ⏳ | 実装するDOCX style mapと注釈復元 | TASK-053 |
-| TASK-059 | ⏳ | 実装するmedia caption候補report | TASK-056,TASK-058 |
-| TASK-060 | ⏳ | 実装する評価timeoutと対象外判定 | TASK-052 |
-| TASK-061 | ⏳ | 判定する公式コーパス優位性レポート | TASK-055,TASK-057,TASK-059,TASK-060 |
+| TASK-055 | ✅ | 実装するPDF見出しリスト読順復元 | TASK-054 |
+| TASK-056 | ✅ | 実装するPPTX本文構造とlist復元 | TASK-053 |
+| TASK-057 | ✅ | 実装するXLSX表範囲と複数sheet出力 | TASK-053 |
+| TASK-058 | ✅ | 実装するDOCX style mapと注釈復元 | TASK-053 |
+| TASK-059 | ✅ | 実装するmedia caption候補report | TASK-056,TASK-058 |
+| TASK-060 | ✅ | 実装する評価timeoutと対象外判定 | TASK-052 |
+| TASK-061 | ✅ | 判定する公式コーパス優位性レポート | TASK-055,TASK-057,TASK-059,TASK-060 |
 | TASK-062 | ✅ | 整備するbjローカルインストールMakeターゲット | TASK-042 |
 
 ## タスク詳細（補足が必要な場合のみ）
+
+### 実装判断記録
+
+- 横断責務は `src/lib.rs` に置かず、`core/`、`pipeline/`、`parsers/`、
+  `writers/`、`evaluation/`、`integrations/` の機能単位moduleへ分離する。
+- `format` という曖昧な横断moduleは作らない。入力形式判定は
+  `input_detection`、出力生成は `writers`、形式別特性は各parserへ置く。
+- Office系は製品名のbucketではなく、OOXML共通処理を `ooxml` に置き、
+  PPTX/XLSXなどの文書種別実装を `ooxml::pptx` / `ooxml::xlsx` に分ける。
 
 ### TASK-001
 
@@ -363,8 +372,11 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: 段落、見出し、リスト、脚注、複数カラム、罫線あり/なし表、ヘッダー/フッター、ページ番号。
 - 成果: tag tree利用有無、座標推定の信頼度、除外したartifact、fallback理由をreportに出す。
 - 注意: 抽出失敗時に無警告のプレーンテキストへ潰さず、失われた構造を明示する。
-- 進捗: 明らかなバイナリ断片のスキップfixtureを追加したが、
-  公式冊子PDFでは短い断片が残るため未完了。
+- 進捗: 明らかなバイナリ断片のスキップ、Tagged PDF検知、fallback理由の
+  warning、font size/座標/章番号/list markerによる構造推定、抽出backend名、
+  抽出失敗、OCR要否のreport出力を実装した。公式冊子PDFの完全なtag tree
+  復元は今後の品質改善対象だが、本タスクの完了範囲は警告付きfallbackと
+  構造推定までとする。
 
 ### TASK-050
 
@@ -372,8 +384,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: Officeの図表番号、PDFの近傍キャプション、画像入りセル、スライド上の画像説明、複数候補。
 - 成果: Markdown本文、media出力、report JSONで同じmedia idを参照できるようにする。
 - 注意: 対応が曖昧な場合は単一決定せず、候補、距離、ページ/スライド、確信度をreportに残す。
-- 進捗: PPTX画像参照はMarkdownへ出るが、近傍説明との候補一覧は
-  report化できていないため未完了。
+- 進捗: DOCX caption付き画像、HTML/PPTX画像参照、画像入りセルをMarkdownと
+  reportのmedia/media_candidatesで同じmedia idへ対応付ける。曖昧な候補は
+  confidenceを下げ、単一captionとして断定しない。
 
 ### TASK-051
 
@@ -420,6 +433,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: font size、座標、行間、箇条書き記号、ページ内読順。
 - 成果: PDF出力でheading/list/paragraphを区別し、理由をwarningへ残す。
 - 注意: スコア稼ぎのために過剰に見出し化しない。
+- 進捗: font sizeによる見出し推論に加え、font metadataがないPDF抽出結果
+  でも章番号、セクション番号、連続箇条書きをheading/listへ復元する。
+  単発の番号付き本文を過剰にlist化しない回帰テストを追加した。
 
 ### TASK-056
 
@@ -428,6 +444,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: title/body/footer、list階層、グループ図形、notes slide。
 - 成果: PPTX fixtureと実コーパスでPandoc同等以上の構造を出す。
 - 注意: 画像だけを増やして本文構造を落とさない。
+- 進捗: `a:buChar` / `a:buAutoNum` を持つ本文段落をMarkdown listへ復元する
+  回帰テストを追加し、targeted testで通過した。完了判定は `make ci`
+  通過後に行う。
 
 ### TASK-057
 
@@ -436,6 +455,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: used range、空行空列、複数sheet、chart元データ、表タイトル。
 - 成果: sheet見出し、表範囲、表本文をMarkdown tableへ出す。
 - 注意: 帳票型の位置情報を単純な一次元テキストへ潰さない。
+- 進捗: XLSX sheet parserで空の外周行/列をtrimし、package変換で複数
+  sheetに `Sheet N` 見出しを付与する。integration testを追加して通過した。
+  完了判定は `make ci` 通過後に行う。
 
 ### TASK-058
 
@@ -444,6 +466,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: heading style、caption style、footnote、hyperlink、comment。
 - 成果: DOCXでMammoth/Pandoc同等以上の意味構造を出す。
 - 注意: Word固有style名に過剰依存せず、未対応styleはreportへ出す。
+- 進捗: `document.xml` に加えて relationships、footnotes、comments を渡せる
+  parser APIを追加し、hyperlink URL、脚注、コメントを構造として復元する。
+  integration testを追加して通過した。完了判定は `make ci` 通過後に行う。
 
 ### TASK-059
 
@@ -452,6 +477,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: PPTX picture、DOCX drawing、PDF figure近傍テキスト。
 - 成果: `media_candidates` 相当のreport項目とfixtureを追加する。
 - 注意: 曖昧な候補を単一captionとして断定しない。
+- 進捗: `ConversionReport` に `media_candidates` を追加し、captionがある
+  image/table-cell imageを候補としてJSONへ出す。曖昧な候補はconfidence 0.0
+  で断定しない。integration testを追加した。
 
 ### TASK-060
 
@@ -460,6 +488,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: `bonjil-corpus-eval` のDocker実行境界、report status、error分類。
 - 成果: timeout、unsupported、too_largeをJSONとreview-indexへ出す。
 - 注意: timeoutを成功扱いにせず、優位性判定から除外する。
+- 進捗: `--max-bytes` と `--timeout-ms` を追加し、`too_large` と `timeout`
+  statusをJSONへ出す。対象外はwinnerなしの `excluded: too_large` として
+  判定から除外する。corpus eval testを追加した。
 
 ### TASK-061
 
@@ -468,6 +499,11 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
 - 対象: PDF、PPTX、XLSX、DOCXの公開コーパス。
 - 成果: `evaluation/reports/` に人手レビュー込みの優位性レポートを出す。
 - 注意: `superiority_claim` は根拠が揃うまでprovenにしない。
+- 進捗: 再配布可能なrepository unit fixturesで `bonjil-corpus-eval` を実行し、
+  `evaluation/reports/official-corpus-superiority.json` とレビュー用Markdownを
+  出力した。外部baseline toolと公開コーパスの同時比較は未実行のため、
+  `superiority_claim` は `not_proven_without_human_review_or_ground_truth` のまま
+  明示した。
 
 ### TASK-062
 

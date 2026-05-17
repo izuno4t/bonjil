@@ -26,6 +26,19 @@ Use Rust 2024 edition conventions and format code with `cargo fmt`.
 Prefer clear module boundaries, explicit CLI errors, and stable report
 schemas. Use `snake_case` for Rust functions, modules, and test names.
 Use kebab-case for generated files and CLI-facing examples.
+Keep `src/lib.rs` limited to module declarations and public re-exports.
+Organize `src/` by functional responsibility:
+`core/` for AST, options, reports, config, naming, JSON, and text helpers;
+`pipeline/` for conversion control, input detection, media reference
+collection, and report feature assembly; `parsers/` for input document
+parsers; `writers/` for Markdown/HTML output writers; `evaluation/` for
+metric functions; and `integrations/` for LLM/OCR/media backends. Name
+modules by responsibility, not by a vague bucket such as `format`.
+
+For OOXML files, keep shared package/XML helpers under `src/ooxml/`.
+Expose document-type behavior through specific modules such as `docx`,
+`pptx`, and `xlsx`. Do not create an `office` bucket unless it contains
+actual cross-Office behavior; otherwise split by document type.
 
 ## Testing Guidelines
 

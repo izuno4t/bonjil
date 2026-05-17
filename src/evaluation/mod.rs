@@ -1,0 +1,404 @@
+use crate::{AstNode, MetricScore, OcrCerCase};
+use std::collections::BTreeMap;
+
+pub fn evaluate_structure_fidelity(expected: &[AstNode], actual: &[AstNode]) -> MetricScore {
+    let expected_signature = structure_signature(expected);
+    let actual_signature = structure_signature(actual);
+    let total = expected_signature.len().max(1);
+    let matched = expected_signature
+        .iter()
+        .zip(actual_signature.iter())
+        .filter(|(left, right)| node_kind(left) == node_kind(right))
+        .count();
+    MetricScore {
+        name: "structure_fidelity".to_string(),
+        score: matched as f64 / total as f64,
+        errors: total.saturating_sub(matched),
+        warnings: Vec::new(),
+    }
+}
+
+pub fn evaluate_heading_recall(expected: &[AstNode], markdown: &str) -> MetricScore {
+    let expected_headings = collect_headings(expected);
+    let actual_headings = markdown
+        .lines()
+        .filter_map(parse_markdown_heading)
+        .collect::<Vec<_>>();
+    let missing = expected_headings
+        .iter()
+        .filter(|expected| {
+            !actual_headings.iter().any(|actual| {
+                expected.level == actual.level && expected.text.trim() == actual.text.trim()
+            })
+        })
+        .collect::<Vec<_>>();
+    let total = expected_headings.len().max(1);
+    let found = expected_headings.len().saturating_sub(missing.len());
+    MetricScore {
+        name: "heading_recall".to_string(),
+        score: found as f64 / total as f64,
+        errors: missing.len(),
+        warnings: missing
+            .into_iter()
+            .map(|heading| format!("missing heading h{} {}", heading.level, heading.text))
+            .collect(),
+    }
+}
+
+pub fn evaluate_table_integrity(markdown: &str) -> MetricScore {
+    let mut warnings = Vec::new();
+    let mut errors = 0;
+    let has_pipe_table = evaluate_pipe_tables(markdown, &mut warnings, &mut errors);
+    let has_html_table = evaluate_html_tables(markdown, &mut warnings, &mut errors);
+    if !has_pipe_table && !has_html_table {
+        errors += 1;
+        warnings.push("no table detected".to_string());
+    }
+    let score = if errors == 0 { 1.0 } else { 0.0 };
+    MetricScore {
+        name: "table_integrity".to_string(),
+        score,
+        errors,
+        warnings,
+    }
+}
+
+pub fn evaluate_lint_score(markdown: &str) -> MetricScore {
+    let mut errors = 0;
+    let mut warnings = Vec::new();
+    if !markdown.ends_with('\n') {
+        errors += 1;
+        warnings.push("Markdown must end with a trailing newline.".to_string());
+    }
+    if markdown.lines().any(|line| line.ends_with(' ')) {
+        errors += 1;
+        warnings.push("Markdown contains trailing spaces.".to_string());
+    }
+    let lines = markdown.lines().collect::<Vec<_>>();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            if index > 0 && !lines[index - 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown heading must be preceded by a blank line.".to_string());
+            }
+            if index + 1 < lines.len() && !lines[index + 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown heading must be followed by a blank line.".to_string());
+            }
+        }
+        if trimmed.starts_with("- ") {
+            if index > 0 && !lines[index - 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown list must be preceded by a blank line.".to_string());
+            }
+            if index + 1 < lines.len() && !lines[index + 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown list must be followed by a blank line.".to_string());
+            }
+        }
+        if trimmed.starts_with('|') {
+            let previous_is_table = index > 0 && lines[index - 1].trim().starts_with('|');
+            let next_is_table = index + 1 < lines.len() && lines[index + 1].trim().starts_with('|');
+            if !previous_is_table && index > 0 && !lines[index - 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown table must be preceded by a blank line.".to_string());
+            }
+            if !next_is_table && index + 1 < lines.len() && !lines[index + 1].trim().is_empty() {
+                errors += 1;
+                warnings.push("Markdown table must be followed by a blank line.".to_string());
+            }
+        }
+    }
+    MetricScore {
+        name: "lint_score".to_string(),
+        score: if errors == 0 { 1.0 } else { 0.0 },
+        errors,
+        warnings,
+    }
+}
+
+pub fn evaluate_ocr_cer(expected: &str, actual: &str) -> MetricScore {
+    let distance = levenshtein(expected, actual);
+    let total = expected.chars().count().max(1);
+    MetricScore {
+        name: "ocr_cer".to_string(),
+        score: 1.0 - (distance as f64 / total as f64).min(1.0),
+        errors: distance,
+        warnings: Vec::new(),
+    }
+}
+
+pub fn evaluate_ocr_cer_by_group(cases: &[OcrCerCase]) -> Vec<MetricScore> {
+    let mut grouped = BTreeMap::<(&str, &str), (String, String)>::new();
+    for case in cases {
+        let entry = grouped
+            .entry((case.language.as_str(), case.orientation.as_str()))
+            .or_default();
+        entry.0.push_str(&case.expected);
+        entry.1.push_str(&case.actual);
+    }
+    grouped
+        .into_iter()
+        .map(|((language, orientation), (expected, actual))| {
+            let mut score = evaluate_ocr_cer(&expected, &actual);
+            score.name = format!("ocr_cer:{language}:{orientation}");
+            score
+        })
+        .collect()
+}
+
+pub fn evaluate_translation_structure_preserve(before: &str, after: &str) -> MetricScore {
+    let before_markers = structure_markers(before);
+    let after_markers = structure_markers(after);
+    let total = before_markers.len().max(1);
+    let matched = before_markers
+        .iter()
+        .zip(after_markers.iter())
+        .filter(|(left, right)| left == right)
+        .count();
+    let warnings = before_markers
+        .iter()
+        .zip(
+            after_markers
+                .iter()
+                .chain(std::iter::repeat(&"missing".to_string())),
+        )
+        .filter(|(left, right)| left != right)
+        .map(|(left, right)| format!("translation structure mismatch: {left} != {right}"))
+        .collect::<Vec<_>>();
+    MetricScore {
+        name: "translation_structure_preserve".to_string(),
+        score: matched as f64 / total as f64,
+        errors: total.saturating_sub(matched),
+        warnings,
+    }
+}
+
+fn structure_signature(nodes: &[AstNode]) -> Vec<String> {
+    let mut signature = Vec::new();
+    for node in nodes {
+        push_node_signature(node, &mut signature);
+    }
+    signature
+}
+
+fn push_node_signature(node: &AstNode, signature: &mut Vec<String>) {
+    match node {
+        AstNode::Heading { level, .. } => signature.push(format!("heading:{level}")),
+        AstNode::Paragraph(_) => signature.push("paragraph".to_string()),
+        AstNode::List { ordered, items } => {
+            signature.push(format!(
+                "list:{}",
+                if *ordered { "ordered" } else { "unordered" }
+            ));
+            for item in items {
+                signature.push("list-item".to_string());
+                for node in item {
+                    push_node_signature(node, signature);
+                }
+            }
+        }
+        AstNode::Text(_) => signature.push("text".to_string()),
+        AstNode::Table { rows } => {
+            signature.push("table".to_string());
+            for row in rows {
+                signature.push("table-row".to_string());
+                for cell in &row.cells {
+                    signature.push(format!(
+                        "table-cell:rowspan={}:colspan={}:image={}",
+                        cell.rowspan,
+                        cell.colspan,
+                        cell.image.is_some()
+                    ));
+                }
+            }
+        }
+        AstNode::Image { title, .. } => {
+            signature.push(format!("image:title={}", title.is_some()));
+        }
+        AstNode::CodeBlock { language, .. } => {
+            signature.push(format!("code:language={}", language.is_some()));
+        }
+        AstNode::Footnote { .. } => signature.push("footnote".to_string()),
+        AstNode::RawHtml(_) => signature.push("raw-html".to_string()),
+    }
+}
+
+fn node_kind(node: &String) -> &str {
+    node
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HeadingRef {
+    level: u8,
+    text: String,
+}
+
+fn collect_headings(nodes: &[AstNode]) -> Vec<HeadingRef> {
+    let mut headings = Vec::new();
+    for node in nodes {
+        match node {
+            AstNode::Heading { level, text } => headings.push(HeadingRef {
+                level: *level,
+                text: text.clone(),
+            }),
+            AstNode::List { items, .. } => {
+                for item in items {
+                    headings.extend(collect_headings(item));
+                }
+            }
+            _ => {}
+        }
+    }
+    headings
+}
+
+fn parse_markdown_heading(line: &str) -> Option<HeadingRef> {
+    let trimmed = line.trim_start();
+    let marker_count = trimmed
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
+    if !(1..=6).contains(&marker_count) {
+        return None;
+    }
+    let content = trimmed.get(marker_count..)?;
+    if !content.starts_with(' ') {
+        return None;
+    }
+    let text = content.trim().trim_end_matches('#').trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(HeadingRef {
+        level: marker_count as u8,
+        text: text.to_string(),
+    })
+}
+
+fn evaluate_pipe_tables(markdown: &str, warnings: &mut Vec<String>, errors: &mut usize) -> bool {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    let mut found = false;
+    let mut index = 0;
+    while index < lines.len() {
+        if !lines[index].trim_start().starts_with('|') {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        while index < lines.len() && lines[index].trim_start().starts_with('|') {
+            index += 1;
+        }
+        let table_lines = &lines[start..index];
+        if table_lines.len() < 2 || !table_lines.iter().any(|line| is_pipe_separator(line)) {
+            continue;
+        }
+
+        found = true;
+        let expected_cells = pipe_cell_count(table_lines[0]);
+        for (offset, line) in table_lines.iter().enumerate() {
+            let actual_cells = pipe_cell_count(line);
+            if actual_cells != expected_cells {
+                *errors += 1;
+                warnings.push(format!(
+                    "pipe table row {} has {} cells, expected {}",
+                    start + offset + 1,
+                    actual_cells,
+                    expected_cells
+                ));
+            }
+        }
+    }
+    found
+}
+
+fn evaluate_html_tables(markdown: &str, warnings: &mut Vec<String>, errors: &mut usize) -> bool {
+    let lower = markdown.to_ascii_lowercase();
+    let open_count = lower.matches("<table").count();
+    let close_count = lower.matches("</table>").count();
+    if open_count == 0 && close_count == 0 {
+        return false;
+    }
+    if open_count > close_count {
+        *errors += open_count - close_count;
+        warnings.push("unclosed html table".to_string());
+    } else if close_count > open_count {
+        *errors += close_count - open_count;
+        warnings.push("html table close tag without open tag".to_string());
+    }
+    true
+}
+
+fn is_pipe_separator(line: &str) -> bool {
+    let cells = pipe_cells(line);
+    !cells.is_empty()
+        && cells.iter().all(|cell| {
+            let trimmed = cell.trim();
+            trimmed.len() >= 3
+                && trimmed
+                    .chars()
+                    .all(|character| matches!(character, '-' | ':' | ' '))
+        })
+}
+
+fn pipe_cell_count(line: &str) -> usize {
+    pipe_cells(line).len()
+}
+
+fn pipe_cells(line: &str) -> Vec<&str> {
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .collect()
+}
+
+fn structure_markers(markdown: &str) -> Vec<String> {
+    let mut in_code = false;
+    markdown
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") {
+                if in_code {
+                    in_code = false;
+                    None
+                } else {
+                    in_code = true;
+                    Some("code".to_string())
+                }
+            } else if in_code {
+                None
+            } else if trimmed.starts_with('#') {
+                Some("#".repeat(trimmed.chars().take_while(|ch| *ch == '#').count()))
+            } else if trimmed.starts_with("- ") {
+                Some("-".to_string())
+            } else if trimmed.starts_with('|') {
+                Some("|".to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn levenshtein(left: &str, right: &str) -> usize {
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut costs = (0..=right_chars.len()).collect::<Vec<_>>();
+    for (i, left_char) in left.chars().enumerate() {
+        let mut last = i;
+        costs[0] = i + 1;
+        for (j, right_char) in right_chars.iter().enumerate() {
+            let old = costs[j + 1];
+            costs[j + 1] = if left_char == *right_char {
+                last
+            } else {
+                1 + last.min(old).min(costs[j])
+            };
+            last = old;
+        }
+    }
+    costs[right_chars.len()]
+}

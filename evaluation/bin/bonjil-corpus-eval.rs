@@ -27,7 +27,13 @@ fn run() -> io::Result<()> {
 
     let mut cases = Vec::new();
     for file in files {
-        cases.push(evaluate_file(&file, &output_root, &args.tools)?);
+        cases.push(evaluate_file(
+            &file,
+            &output_root,
+            &args.tools,
+            args.max_bytes,
+            args.timeout_ms,
+        )?);
     }
 
     let summary = summarize(&cases);
@@ -51,6 +57,8 @@ struct Args {
     per_ext: usize,
     extensions: Option<Vec<String>>,
     tools: Vec<String>,
+    timeout_ms: u64,
+    max_bytes: u64,
 }
 
 impl Args {
@@ -62,6 +70,8 @@ impl Args {
         let mut per_ext = 5;
         let mut extensions = None;
         let mut tools = vec!["pandoc".to_string(), "markitdown".to_string()];
+        let mut timeout_ms = 120_000;
+        let mut max_bytes = 50 * 1024 * 1024;
         let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -110,6 +120,16 @@ impl Args {
                             .collect();
                     }
                 }
+                "--timeout-ms" => {
+                    if let Some(value) = args.next().and_then(|value| value.parse().ok()) {
+                        timeout_ms = value;
+                    }
+                }
+                "--max-bytes" => {
+                    if let Some(value) = args.next().and_then(|value| value.parse().ok()) {
+                        max_bytes = value;
+                    }
+                }
                 _ => {}
             }
         }
@@ -121,6 +141,8 @@ impl Args {
             per_ext,
             extensions,
             tools,
+            timeout_ms,
+            max_bytes,
         }
     }
 }
@@ -211,14 +233,42 @@ fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     Ok(())
 }
 
-fn evaluate_file(input: &Path, output_root: &Path, tools: &[String]) -> io::Result<CaseResult> {
+fn evaluate_file(
+    input: &Path,
+    output_root: &Path,
+    tools: &[String],
+    max_bytes: u64,
+    timeout_ms: u64,
+) -> io::Result<CaseResult> {
     let extension = extension(input).unwrap_or_else(|| "unknown".to_string());
+    if fs::metadata(input)?.len() > max_bytes {
+        let mut results = vec![skipped_tool_result(
+            "bonjil",
+            "too_large",
+            "file exceeds evaluator max bytes",
+        )];
+        results.extend(
+            tools
+                .iter()
+                .filter(|tool| tool.as_str() != "bonjil")
+                .map(|tool| {
+                    skipped_tool_result(tool, "too_large", "file exceeds evaluator max bytes")
+                }),
+        );
+        return Ok(CaseResult {
+            input: input.to_path_buf(),
+            extension,
+            results,
+            winner: None,
+            judgment: "excluded: too_large".to_string(),
+        });
+    }
     let mut results = vec![run_bonjil(input, output_root)?];
     for tool in tools {
         if tool == "bonjil" {
             continue;
         }
-        results.push(run_external_tool(tool, input, output_root));
+        results.push(run_external_tool(tool, input, output_root, timeout_ms));
     }
     let winner = results
         .iter()
@@ -249,6 +299,17 @@ fn evaluate_file(input: &Path, output_root: &Path, tools: &[String]) -> io::Resu
         winner,
         judgment,
     })
+}
+
+fn skipped_tool_result(tool: &str, status: &str, error: &str) -> ToolResult {
+    ToolResult {
+        tool: tool.to_string(),
+        status: status.to_string(),
+        elapsed_ms: 0,
+        output_path: None,
+        error: Some(error.to_string()),
+        metrics: MarkdownMetrics::default(),
+    }
 }
 
 fn run_bonjil(input: &Path, output_root: &Path) -> io::Result<ToolResult> {
@@ -289,8 +350,18 @@ fn run_bonjil(input: &Path, output_root: &Path) -> io::Result<ToolResult> {
     }
 }
 
-fn run_external_tool(tool: &str, input: &Path, output_root: &Path) -> ToolResult {
+fn run_external_tool(tool: &str, input: &Path, output_root: &Path, timeout_ms: u64) -> ToolResult {
     let started = Instant::now();
+    if timeout_ms == 0 {
+        return ToolResult {
+            tool: tool.to_string(),
+            status: "timeout".to_string(),
+            elapsed_ms: 0,
+            output_path: None,
+            error: Some("external tool timed out before execution".to_string()),
+            metrics: MarkdownMetrics::default(),
+        };
+    }
     if !command_exists("docker") {
         return ToolResult {
             tool: tool.to_string(),

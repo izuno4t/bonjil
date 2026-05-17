@@ -233,3 +233,122 @@ fn pdf_parser_does_not_claim_ocr_is_required_when_internal_backend_fails() {
             .any(|warning| { warning.contains("A full PDF backend or OCR may be required") })
     );
 }
+
+#[test]
+fn infers_pdf_headings_and_lists_from_section_numbers_without_font_metadata() {
+    struct LinesOnlyBackend;
+
+    impl PdfTextBackend for LinesOnlyBackend {
+        fn name(&self) -> &str {
+            "lines-only"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![
+                    pdf::PdfTextObject {
+                        text: "1 VPN接続の概要".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "本文です。".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "1.1 事前準備".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "- VPNクライアントをインストールする".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                    pdf::PdfTextObject {
+                        text: "- 証明書を用意する".to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    },
+                ],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+
+    let result = pdf::parse_pdf_with_backend(b"%PDF-1.7", &LinesOnlyBackend, &mut warnings);
+
+    assert_eq!(
+        result.ast,
+        vec![
+            AstNode::Heading {
+                level: 1,
+                text: "1 VPN接続の概要".to_string(),
+            },
+            AstNode::Paragraph("本文です。".to_string()),
+            AstNode::Heading {
+                level: 2,
+                text: "1.1 事前準備".to_string(),
+            },
+            AstNode::List {
+                ordered: false,
+                items: vec![
+                    vec![AstNode::Text(
+                        "VPNクライアントをインストールする".to_string()
+                    )],
+                    vec![AstNode::Text("証明書を用意する".to_string())],
+                ],
+            },
+        ]
+    );
+    assert!(warnings.iter().any(|warning| {
+        warning.contains("PDF heading inference treated '1 VPN接続の概要' as h1 by section number")
+    }));
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("PDF list inference grouped 2 item(s)"))
+    );
+}
+
+#[test]
+fn pdf_section_number_in_sentence_is_not_promoted_to_heading() {
+    struct LinesOnlyBackend;
+
+    impl PdfTextBackend for LinesOnlyBackend {
+        fn name(&self) -> &str {
+            "lines-only"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![pdf::PdfTextObject {
+                    text: "1. VPNを設定します。".to_string(),
+                    font_size: None,
+                    x: None,
+                    y: None,
+                }],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+
+    let result = pdf::parse_pdf_with_backend(b"%PDF-1.7", &LinesOnlyBackend, &mut warnings);
+
+    assert_eq!(
+        result.ast,
+        vec![AstNode::Paragraph("1. VPNを設定します。".to_string())]
+    );
+}
