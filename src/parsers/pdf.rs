@@ -6,6 +6,10 @@ pub fn parse_pdf(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<AstNode> {
     parse_pdf_with_backend(bytes, &InternalPdfTextBackend, warnings).ast
 }
 
+pub fn is_encrypted_pdf(bytes: &[u8]) -> bool {
+    String::from_utf8_lossy(bytes).contains("/Encrypt")
+}
+
 pub fn parse_pdf_with_embedded_backend(bytes: &[u8], warnings: &mut Vec<String>) -> PdfParseResult {
     let primary = parse_pdf_with_backend(bytes, &PdfExtractBackend, warnings);
     if !primary.extraction_failed && !primary.ocr_required {

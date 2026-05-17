@@ -312,6 +312,35 @@ fn pdf_conversion_report_records_backend_and_ocr_requirement() {
     );
 }
 
+#[test]
+fn pdf_conversion_keeps_no_text_message_for_unencrypted_pdf() {
+    let converter = Converter::new();
+
+    let result = converter.convert_bytes("empty.pdf", b"%PDF-1.7").unwrap();
+
+    assert!(
+        result
+            .markdown
+            .contains("PDF text extraction produced no text")
+    );
+}
+
+#[test]
+fn pdf_conversion_errors_when_text_extraction_has_no_text_and_pdf_is_encrypted() {
+    let converter = Converter::new();
+
+    let error = converter
+        .convert_bytes("encrypted.pdf", b"%PDF-1.7\ntrailer\n<</Encrypt 1 0 R>>")
+        .unwrap_err();
+
+    assert!(error.to_string().contains("PDF is encrypted"));
+    assert!(
+        error
+            .to_string()
+            .contains("PDF text extraction produced no text")
+    );
+}
+
 fn minimal_text_pdf() -> Vec<u8> {
     let content = "BT\n/F1 24 Tf\n72 720 Td\n(Fixture Title) Tj\n/F1 11 Tf\n0 -24 Td\n(Fixture body text.) Tj\nET\n";
     let objects = [

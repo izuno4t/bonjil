@@ -66,6 +66,12 @@ impl Converter {
                     "pdf_ocr_required".to_string(),
                     result.ocr_required.to_string(),
                 ));
+                if result.ocr_required && pdf::is_encrypted_pdf(bytes) {
+                    return Err(io::Error::other(format!(
+                        "PDF text extraction produced no text with backend {} because the PDF is encrypted. Decrypt the PDF or provide an unencrypted copy.",
+                        result.backend
+                    )));
+                }
                 let ast = result.ast.clone();
                 pdf_report = Some(result);
                 ast
