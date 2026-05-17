@@ -68,8 +68,16 @@ impl Converter {
                 ));
                 if result.ocr_required && pdf::is_encrypted_pdf(bytes) {
                     return Err(io::Error::other(format!(
-                        "PDF text extraction produced no text with backend {} because the PDF is encrypted. Decrypt the PDF or provide an unencrypted copy.",
+                        "PDF text extraction produced no text after trying Rust PDF backends; the PDF is encrypted. Last backend: {}. Decrypt the PDF or provide an unencrypted copy.",
                         result.backend
+                    )));
+                }
+                if result.ocr_required {
+                    let diagnosis = pdf::diagnose_no_extractable_text(bytes);
+                    return Err(io::Error::other(format!(
+                        "PDF text extraction produced no text after trying Rust PDF backends. Last backend: {}. {}",
+                        result.backend,
+                        diagnosis.message()
                     )));
                 }
                 let ast = result.ast.clone();

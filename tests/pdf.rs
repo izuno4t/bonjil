@@ -211,6 +211,75 @@ fn pdf_parser_accepts_replaceable_text_backend() {
 }
 
 #[test]
+fn pdf_parser_tries_next_backend_when_primary_extracts_no_text() {
+    struct EmptyBackend;
+    struct TextBackend;
+
+    impl PdfTextBackend for EmptyBackend {
+        fn name(&self) -> &str {
+            "empty-backend"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: Vec::new(),
+                extraction_failed: false,
+                ocr_required: true,
+            }
+        }
+    }
+
+    impl PdfTextBackend for TextBackend {
+        fn name(&self) -> &str {
+            "text-backend"
+        }
+
+        fn extract_text(&self, _bytes: &[u8]) -> PdfTextExtraction {
+            PdfTextExtraction {
+                objects: vec![pdf::PdfTextObject {
+                    text: "Recovered text".to_string(),
+                    font_size: None,
+                    x: None,
+                    y: None,
+                }],
+                extraction_failed: false,
+                ocr_required: false,
+            }
+        }
+    }
+
+    let mut warnings = Vec::new();
+    let backends: [&dyn PdfTextBackend; 2] = [&EmptyBackend, &TextBackend];
+
+    let result = pdf::parse_pdf_with_ordered_backends(b"%PDF-1.7", &backends, &mut warnings);
+
+    assert_eq!(result.backend, "text-backend");
+    assert!(!result.ocr_required);
+    assert_eq!(
+        result.ast,
+        vec![AstNode::Paragraph("Recovered text".to_string())]
+    );
+}
+
+#[test]
+fn pdf_no_text_diagnosis_detects_image_only_pdf() {
+    let diagnosis = pdf::diagnose_no_extractable_text(
+        b"%PDF-1.7\n<</ProcSet[/PDF/ImageB]/XObject<</Im0 2 0 R>>>>\n<</Subtype/Image/Type/XObject>>",
+    );
+
+    assert_eq!(diagnosis, pdf::PdfNoTextDiagnosis::ImageOnly);
+}
+
+#[test]
+fn pdf_no_text_diagnosis_detects_missing_unicode_maps() {
+    let diagnosis = pdf::diagnose_no_extractable_text(
+        b"%PDF-1.7\n<</ProcSet[/PDF/Text]/Font<</F1 2 0 R>>>>\n<</Type/Font/Subtype/Type0/Encoding/Identity-H>>",
+    );
+
+    assert_eq!(diagnosis, pdf::PdfNoTextDiagnosis::MissingUnicodeMaps);
+}
+
+#[test]
 fn pdf_parser_does_not_claim_ocr_is_required_when_internal_backend_fails() {
     let mut warnings = Vec::new();
 

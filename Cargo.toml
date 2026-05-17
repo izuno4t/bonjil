@@ -34,5 +34,6 @@ lto = true
 strip = true
 
 [dependencies]
+lopdf = { version = "0.38.0", default-features = false }
 pdf-extract = "0.10.0"
 zip = "8.6.0"

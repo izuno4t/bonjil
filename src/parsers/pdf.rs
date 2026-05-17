@@ -7,24 +7,56 @@ pub fn parse_pdf(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<AstNode> {
 }
 
 pub fn is_encrypted_pdf(bytes: &[u8]) -> bool {
-    String::from_utf8_lossy(bytes).contains("/Encrypt")
+    lopdf::Document::load_mem(bytes)
+        .map(|document| document.is_encrypted())
+        .unwrap_or_else(|_| String::from_utf8_lossy(bytes).contains("/Encrypt"))
+}
+
+pub fn diagnose_no_extractable_text(bytes: &[u8]) -> PdfNoTextDiagnosis {
+    let lossy = String::from_utf8_lossy(bytes);
+    let has_image = contains_pdf_name(&lossy, "/Subtype", "Image")
+        || lossy.contains("/Subtype/Image")
+        || lossy.contains("/ImageB")
+        || lossy.contains("/ImageC")
+        || lossy.contains("/ImageI");
+    let has_font = lossy.contains("/Font");
+    let has_text_procset = lossy.contains("/PDF/Text") || lossy.contains("/PDF /Text");
+    let has_to_unicode = lossy.contains("/ToUnicode");
+
+    if has_image && !has_font && !has_text_procset {
+        PdfNoTextDiagnosis::ImageOnly
+    } else if (has_font || has_text_procset) && !has_to_unicode {
+        PdfNoTextDiagnosis::MissingUnicodeMaps
+    } else {
+        PdfNoTextDiagnosis::Unknown
+    }
 }
 
 pub fn parse_pdf_with_embedded_backend(bytes: &[u8], warnings: &mut Vec<String>) -> PdfParseResult {
-    let primary = parse_pdf_with_backend(bytes, &PdfExtractBackend, warnings);
-    if !primary.extraction_failed && !primary.ocr_required {
-        return primary;
-    }
+    let backends: [&dyn PdfTextBackend; 3] = [
+        &PdfExtractBackend,
+        &LopdfTextBackend,
+        &InternalPdfTextBackend,
+    ];
+    parse_pdf_with_ordered_backends(bytes, &backends, warnings)
+}
 
-    let fallback = parse_pdf_with_backend(bytes, &InternalPdfTextBackend, warnings);
-    let fallback_has_text = fallback.ast.iter().any(|node| match node {
-        AstNode::Paragraph(text) | AstNode::Text(text) => {
-            !text.starts_with("PDF text extraction produced no text")
+pub fn parse_pdf_with_ordered_backends(
+    bytes: &[u8],
+    backends: &[&dyn PdfTextBackend],
+    warnings: &mut Vec<String>,
+) -> PdfParseResult {
+    let mut best_result = None;
+    for backend in backends {
+        let result = parse_pdf_with_backend(bytes, *backend, warnings);
+        if pdf_result_has_text(&result) {
+            return result;
         }
-        AstNode::Heading { .. } => true,
-        _ => true,
-    });
-    if fallback_has_text { fallback } else { primary }
+        if best_result.is_none() || result.extraction_failed {
+            best_result = Some(result);
+        }
+    }
+    best_result.unwrap_or_else(|| parse_pdf_with_backend(bytes, &InternalPdfTextBackend, warnings))
 }
 
 pub fn parse_pdf_with_backend(
@@ -98,6 +130,31 @@ pub struct InternalPdfTextBackend;
 
 pub struct PdfExtractBackend;
 
+pub struct LopdfTextBackend;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PdfNoTextDiagnosis {
+    ImageOnly,
+    MissingUnicodeMaps,
+    Unknown,
+}
+
+impl PdfNoTextDiagnosis {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::ImageOnly => {
+                "PDF contains page images but no extractable text layer. OCR is required."
+            }
+            Self::MissingUnicodeMaps => {
+                "PDF text uses embedded fonts without Unicode maps, so glyphs cannot be converted back to text."
+            }
+            Self::Unknown => {
+                "PDF text extraction failed for a non-encrypted PDF; cause could not be classified."
+            }
+        }
+    }
+}
+
 impl PdfTextBackend for PdfExtractBackend {
     fn name(&self) -> &str {
         "pdf-extract"
@@ -133,6 +190,66 @@ impl PdfTextBackend for PdfExtractBackend {
     }
 }
 
+fn contains_pdf_name(input: &str, key: &str, value: &str) -> bool {
+    input
+        .match_indices(key)
+        .any(|(index, _)| input[index + key.len()..].trim_start().starts_with(value))
+}
+
+impl PdfTextBackend for LopdfTextBackend {
+    fn name(&self) -> &str {
+        "lopdf"
+    }
+
+    fn extract_text(&self, bytes: &[u8]) -> PdfTextExtraction {
+        let mut document = match lopdf::Document::load_mem(bytes) {
+            Ok(document) => document,
+            Err(_) => {
+                return PdfTextExtraction {
+                    objects: Vec::new(),
+                    extraction_failed: true,
+                    ocr_required: true,
+                };
+            }
+        };
+
+        if document.is_encrypted() && document.decrypt("").is_err() {
+            return PdfTextExtraction {
+                objects: Vec::new(),
+                extraction_failed: true,
+                ocr_required: true,
+            };
+        }
+
+        let pages = document.get_pages().keys().copied().collect::<Vec<_>>();
+        match document.extract_text(&pages) {
+            Ok(text) => {
+                let objects = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(|line| PdfTextObject {
+                        text: line.to_string(),
+                        font_size: None,
+                        x: None,
+                        y: None,
+                    })
+                    .collect::<Vec<_>>();
+                PdfTextExtraction {
+                    ocr_required: objects.is_empty(),
+                    objects,
+                    extraction_failed: false,
+                }
+            }
+            Err(_) => PdfTextExtraction {
+                objects: Vec::new(),
+                extraction_failed: true,
+                ocr_required: true,
+            },
+        }
+    }
+}
+
 fn extract_text_from_mem_catching_panics(
     bytes: &[u8],
 ) -> Result<Result<String, pdf_extract::OutputError>, Box<dyn std::any::Any + Send>> {
@@ -144,6 +261,16 @@ fn extract_text_from_mem_catching_panics(
     let result = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(bytes));
     std::panic::set_hook(previous_hook);
     result
+}
+
+fn pdf_result_has_text(result: &PdfParseResult) -> bool {
+    result.ast.iter().any(|node| match node {
+        AstNode::Paragraph(text) | AstNode::Text(text) => {
+            !text.starts_with("PDF text extraction produced no text")
+        }
+        AstNode::Heading { .. } => true,
+        _ => true,
+    })
 }
 
 impl PdfTextBackend for InternalPdfTextBackend {

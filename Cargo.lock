@@ -89,6 +89,7 @@ dependencies = [
 name = "bonjil"
 version = "0.1.0"
 dependencies = [
+ "lopdf",
  "pdf-extract",
  "zip",
 ]

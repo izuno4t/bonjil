@@ -313,16 +313,43 @@ fn pdf_conversion_report_records_backend_and_ocr_requirement() {
 }
 
 #[test]
-fn pdf_conversion_keeps_no_text_message_for_unencrypted_pdf() {
+fn pdf_conversion_errors_when_non_encrypted_pdf_has_unknown_no_text_cause() {
     let converter = Converter::new();
 
-    let result = converter.convert_bytes("empty.pdf", b"%PDF-1.7").unwrap();
+    let error = converter.convert_bytes("empty.pdf", b"%PDF-1.7").unwrap_err();
 
-    assert!(
-        result
-            .markdown
-            .contains("PDF text extraction produced no text")
-    );
+    assert!(error.to_string().contains("PDF text extraction produced no text"));
+    assert!(error.to_string().contains("non-encrypted PDF"));
+    assert!(error.to_string().contains("cause could not be classified"));
+}
+
+#[test]
+fn pdf_conversion_errors_when_non_encrypted_pdf_is_image_only() {
+    let converter = Converter::new();
+
+    let error = converter
+        .convert_bytes(
+            "image-only.pdf",
+            b"%PDF-1.7\n1 0 obj\n<</ProcSet[/PDF/ImageB]/XObject<</Im0 2 0 R>>>>\nendobj\n2 0 obj\n<</Subtype/Image/Type/XObject>>\nendobj",
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("PDF contains page images"));
+    assert!(error.to_string().contains("no extractable text layer"));
+}
+
+#[test]
+fn pdf_conversion_errors_when_non_encrypted_pdf_lacks_unicode_maps() {
+    let converter = Converter::new();
+
+    let error = converter
+        .convert_bytes(
+            "font-without-unicode.pdf",
+            b"%PDF-1.7\n1 0 obj\n<</ProcSet[/PDF/Text]/Font<</F1 2 0 R>>>>\nendobj\n2 0 obj\n<</Type/Font/Subtype/Type0/Encoding/Identity-H>>\nendobj",
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("embedded fonts without Unicode maps"));
 }
 
 #[test]
