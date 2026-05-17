@@ -24,6 +24,7 @@ fffd
 GFM
 HackMD
 HedgeDoc
+hayro
 insta
 ipsj
 izuno
@@ -62,7 +63,9 @@ PCORPUS
 pdf
 pdfium
 peekable
+pixmap
 Poppler
+procset
 proptest
 PyMuPDF
 PyMuPDF4LLM
@@ -85,6 +88,7 @@ Surya
 Tesseract
 Turndown
 USPTO
+vello
 VLM
 WebVTT
 XBRL

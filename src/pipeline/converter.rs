@@ -57,12 +57,11 @@ impl Converter {
             "markdown" => vec![AstNode::RawHtml(String::from_utf8_lossy(bytes).to_string())],
             "pdf" => {
                 let mut result = pdf::parse_pdf_with_embedded_backend(bytes, &mut warnings);
-                if !pdf::is_encrypted_pdf(bytes) {
-                    if let Some(ocr_result) =
+                if !pdf::is_encrypted_pdf(bytes)
+                    && let Some(ocr_result) =
                         self.try_pdf_ocr_for_pages_without_text(bytes, &result, &mut warnings)?
-                    {
-                        result = ocr_result;
-                    }
+                {
+                    result = ocr_result;
                 }
                 metadata.push(("pdf_backend".to_string(), result.backend.clone()));
                 metadata.push((
@@ -344,14 +343,17 @@ impl Converter {
         for (page_index, page_objects) in page_texts.into_iter().enumerate() {
             if page_objects.is_empty() {
                 if let Some(text) = ocr_by_page.get(&page_index) {
-                    objects.extend(text.lines().map(str::trim).filter(|line| !line.is_empty()).map(
-                        |line| pdf::PdfTextObject {
-                            text: line.to_string(),
-                            font_size: None,
-                            x: None,
-                            y: None,
-                        },
-                    ));
+                    objects.extend(
+                        text.lines()
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty())
+                            .map(|line| pdf::PdfTextObject {
+                                text: line.to_string(),
+                                font_size: None,
+                                x: None,
+                                y: None,
+                            }),
+                    );
                 }
             } else {
                 objects.extend(page_objects);

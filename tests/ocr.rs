@@ -37,7 +37,10 @@ fn ocr_rs_backend_requires_model_environment() {
         return;
     }
 
-    let backend = ocr::backend_for_engine(&OcrEngine::OcrRs).unwrap_err();
+    let backend = match ocr::backend_for_engine(&OcrEngine::OcrRs) {
+        Ok(_) => panic!("ocr-rs backend should require model environment"),
+        Err(error) => error,
+    };
 
     assert!(backend.to_string().contains("BONJIL_OCR_RS_DET_MODEL"));
     assert!(ocr::command_for_engine(&OcrEngine::OcrRs).is_none());

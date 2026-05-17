@@ -316,9 +316,15 @@ fn pdf_conversion_report_records_backend_and_ocr_requirement() {
 fn pdf_conversion_errors_when_non_encrypted_pdf_has_unknown_no_text_cause() {
     let converter = Converter::new();
 
-    let error = converter.convert_bytes("empty.pdf", b"%PDF-1.7").unwrap_err();
+    let error = converter
+        .convert_bytes("empty.pdf", b"%PDF-1.7")
+        .unwrap_err();
 
-    assert!(error.to_string().contains("PDF text extraction produced no text"));
+    assert!(
+        error
+            .to_string()
+            .contains("PDF text extraction produced no text")
+    );
     assert!(error.to_string().contains("non-encrypted PDF"));
     assert!(error.to_string().contains("cause could not be classified"));
 }
@@ -349,7 +355,11 @@ fn pdf_conversion_errors_when_non_encrypted_pdf_lacks_unicode_maps() {
         )
         .unwrap_err();
 
-    assert!(error.to_string().contains("embedded fonts without Unicode maps"));
+    assert!(
+        error
+            .to_string()
+            .contains("embedded fonts without Unicode maps")
+    );
 }
 
 #[test]

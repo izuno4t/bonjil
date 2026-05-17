@@ -115,6 +115,9 @@ TASK-044以降は、要件文の表現をそのまま作業名へ写すのでは
   `input_detection`、出力生成は `writers`、形式別特性は各parserへ置く。
 - Office系は製品名のbucketではなく、OOXML共通処理を `ooxml` に置き、
   PPTX/XLSXなどの文書種別実装を `ooxml::pptx` / `ooxml::xlsx` に分ける。
+- PDFのページ単位OCR fallbackは、Rust内のPDFレンダリングでページ画像を生成し、
+  OCR境界へ渡す。`ocr-rs` はモデルファイルを同梱せず、明示的な環境変数で
+  detection/recognition/charsetの各モデルを指定する。
 
 ### TASK-001
 
